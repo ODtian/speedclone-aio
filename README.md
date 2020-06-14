@@ -1,2 +1,2 @@
 # speedclone-aio
- asycn io version of speedtest
+ asycn version of speedtest
