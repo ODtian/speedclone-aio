@@ -20,7 +20,7 @@ class FileSystemTransferDownloadTask:
                 else:
                     return
 
-    async def get_total(self):
+    def get_total(self):
         return os.path.getsize(self.file_path)
 
     def get_relative_path(self):
