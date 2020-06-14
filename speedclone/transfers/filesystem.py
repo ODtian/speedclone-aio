@@ -1,7 +1,9 @@
-from ..error import TaskExistError, TaskFailError
-from ..utils import norm_path, iter_path
 import os
+
 import aiofiles
+
+from ..error import TaskExistError, TaskFailError
+from ..utils import iter_path, norm_path
 
 
 class FileSystemTransferDownloadTask:

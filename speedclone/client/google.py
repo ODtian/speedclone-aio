@@ -1,10 +1,9 @@
 import json
 import os
 import time
-from threading import Lock, Thread
+from threading import Thread
 
 import aiofiles
-
 import jwt
 
 from .. import ahttpx
@@ -13,7 +12,6 @@ from .. import ahttpx
 class FileSystemTokenBackend:
     token_url = "https://oauth2.googleapis.com/token"
     http = {}
-    lock = Lock()
 
     def __init__(self, token_path, cred):
         self.token_path = token_path
@@ -64,7 +62,6 @@ class FileSystemServiceAccountTokenBackend(FileSystemTokenBackend):
     def __init__(self, cred_path):
         self.cred_path = cred_path
         self.token = {}
-        self.lock = Lock()
 
         if os.path.exists(self.cred_path):
             with open(self.cred_path, "r") as f:

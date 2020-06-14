@@ -6,11 +6,8 @@ from json.decoder import JSONDecodeError
 from httpx import HTTPError
 
 from .. import ahttpx
-from ..client.google import (
-    FileSystemServiceAccountTokenBackend,
-    FileSystemTokenBackend,
-    GoogleDrive,
-)
+from ..client.google import (FileSystemServiceAccountTokenBackend,
+                             FileSystemTokenBackend, GoogleDrive)
 from ..error import TaskExistError, TaskFailError
 from ..utils import aenumerate, console_write, data_iter, iter_path, norm_path
 

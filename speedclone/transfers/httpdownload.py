@@ -1,8 +1,10 @@
 import os
-import requests
 from urllib.parse import unquote
-from .. import ahttpx
+
 import aiofiles
+import requests
+
+from .. import ahttpx
 
 
 class HttpTransferDownloadTask:

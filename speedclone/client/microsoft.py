@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from threading import Lock, Thread
+from threading import Thread
 from urllib.parse import quote
 
 import aiofiles
@@ -11,7 +11,6 @@ from .. import ahttpx
 
 class FileSystemTokenBackend:
     token_url = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-    lock = Lock()
 
     def __init__(self, token_path, cred, tenant=None):
         self.token_path = token_path
