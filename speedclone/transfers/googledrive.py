@@ -177,24 +177,19 @@ class GoogleDriveTransferManager:
                 dir_path, dir_name = os.path.split(p)
                 base_folder_id = self.path_dict[dir_path]
 
-                has_folder = (
-                    (
-                        await client.get_files_by_name(
-                            base_folder_id, dir_name, fields=("files/id",)
-                        )
-                    )
-                    .json()
-                    .get("files")
+                has_folder_req = await client.get_files_by_name(
+                    base_folder_id, dir_name, fields=("files/id",)
                 )
+                has_folder = has_folder_req.json().get("files")
 
                 if has_folder:
                     folder_id = has_folder[0].get("id")
                 else:
-                    folder_id = (
-                        (await client.create_file_by_name(base_folder_id, dir_name))
-                        .json()
-                        .get("id")
+                    folder_id_req = await client.create_file_by_name(
+                        base_folder_id, dir_name
                     )
+                    folder_id = folder_id_req.json().get("id")
+
                 self.path_dict[p] = folder_id
         return self.path_dict[p]
 
@@ -208,18 +203,16 @@ class GoogleDriveTransferManager:
         client = self._get_client()
         dir_path, name = os.path.split(path)
         parent_dir_id = await self._get_dir_id(client, dir_path)
-        is_file = (
-            (
-                await client.get_files_by_name(
-                    parent_dir_id,
-                    name,
-                    mime="file",
-                    fields=("files/id", "files/name", "files/mimeType", "files/size"),
-                )
-            )
-            .json()
-            .get("files", [])
+
+        is_file_req = await client.get_files_by_name(
+            parent_dir_id,
+            name,
+            mime="file",
+            fields=("files/id", "files/name", "files/mimeType", "files/size"),
         )
+
+        is_file = is_file_req.json().get("files", [])
+
         for i in is_file:
             yield i.get("id", ""), i.get("name", ""), int(i.get("size", 0))
 
