@@ -13,12 +13,14 @@ class BaseBarManager:
         console_write(mode="sleep", message=message)
 
     def error(self, e):
+        print(e)
         console_write(mode="error", message=e.msg)
 
     def exists(self, e):
         console_write(mode="exists", message=e.msg)
 
     def fail(self, e):
+        print(e)
         console_write(mode="fail", message=e.msg)
 
     def exit(self):
