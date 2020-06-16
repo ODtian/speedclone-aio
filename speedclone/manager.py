@@ -62,12 +62,9 @@ class TransferManager:
 
     async def get_task(self):
         try:
-            async with aiotimeout.timeout(self.sleep_time):
-                task = await self.task_queue.get()
+            task = await asyncio.wait_for(self.task_queue.get(), timeout=self.sleep_time)
         except asyncio.TimeoutError:
             return
-        except Exception:
-            pass
         else:
             return task
 
