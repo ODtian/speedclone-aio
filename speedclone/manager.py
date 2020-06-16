@@ -18,20 +18,20 @@ class TransferManager:
         self.bar_manager = bar_manager
 
         self.sleep_time = sleep_time
-
-        # self.pusher_thread = None
         self.pusher_finished = False
 
         self.task_queue = asyncio.Queue()
-        # self.taskdone_queue = Queue()
         self.now_task = 0
-        # self.sleep_queue = asyncio.Queue()
-
-        # self.futures = []
 
     async def put_task(self, task):
         self.now_task += 1
-        await self.task_queue.put(task)
+        _worker = await self.upload_manager.get_worker(task)
+        bar = self.bar_manager.get_bar(task)
+
+        async def worker():
+            return await _worker(bar)
+
+        await self.task_queue.put(worker)
 
     def task_done(self):
         self.now_task -= 1
@@ -39,8 +39,6 @@ class TransferManager:
     async def handle_sleep(self, e):
         await self.put_task(e.task)
         time.sleep(e.sleep_time)
-        # if not await self.sleep_queue.empty():
-        #     await self.sleep_queue.put(e.sleep_time)
         self.bar_manager.sleep(e)
 
     async def handle_error(self, e):
@@ -59,46 +57,8 @@ class TransferManager:
             await self.put_task(task)
         self.pusher_finished = True
 
-    # def run_task_pusher(self):
-    #     def pusher():
-    #         for task in self.download_manager.iter_tasks():
-    #             if self.pusher_finished:
-    #                 return
-    #             else:
-    #                 self.put_task(task)
-    #         self.pusher_finished = True
-
-    #     self.pusher_thread = Thread(target=pusher)
-    #     self.pusher_thread.start()
-
     def finished(self):
         return self.now_task == 0 and self.pusher_finished
-
-    # def if_sleep(self):
-    #     return not self.sleep_queue.empty()
-
-    # def sleep(self):
-    #     if not await self.sleep_queue.empty():
-    #         sleep_time = await self.sleep_queue.get()
-    #         time.sleep(sleep_time)
-    # def done_callback(self, task):
-    #     try:
-    #         task.result()
-    #     except CancelledError:
-    #         pass
-    #     except TaskExistError as e:
-    #         self.handle_exists(e)
-    #     except TaskSleepError as e:
-    #         self.handle_sleep(e)
-    #     except TaskFailError as e:
-    #         self.handle_fail(e)
-    #     except Exception as e:
-    #         self.handle_error(e)
-    #     finally:
-    #         self.task_done()
-
-    # def clear_all_futueres(self):
-    #     [f.cancel() for f in self.futures]
 
     async def get_task(self):
         try:
@@ -109,29 +69,17 @@ class TransferManager:
         else:
             return task
 
-    # def get_worker(self, task):
-    #     _worker = self.upload_manager.get_worker(task)
-    #     bar = self.bar_manager.get_bar(task)
-
-    #     def worker():
-    #         self.sleep_queue.join()
-    #         return _worker(bar)
-
-    #     return worker
-
-    async def worker(self,):
+    async def excutor(self):
         while True:
             if self.finished():
                 break
             else:
-                task = await self.get_task()
-                if not task:
+                worker = await self.get_task()
+                if not worker:
                     continue
-                worker = await self.upload_manager.get_worker(task)
-                bar = await self.bar_manager.get_bar(task)
 
                 try:
-                    await worker(bar)
+                    await worker()
                 except TaskSleepError as e:
                     await self.handle_sleep(e)
                 except TaskExistError as e:
@@ -144,47 +92,9 @@ class TransferManager:
                     self.task_done()
                     await asyncio.sleep(self.sleep_time)
 
-    # def add_to_excutor(self, executor):
-    #     while True:
-    #         if self.finished():
-    #             break
-    #         elif self.if_sleep():
-    #             self.sleep()
-    #         else:
-    #             task = self.get_task()
-    #             if not task:
-    #                 continue
-    #             worker = self.get_worker(task)
-    #             future = executor.submit(worker)
-    #             future.add_done_callback(self.done_callback)
-    #             self.futures.append(future)
-    #         time.sleep(self.sleep_time)
-
     def run(self, max_workers=10):
         event = asyncio.gather(
-            self.task_pusher(), *[self.worker() for _ in range(max_workers)]
+            self.task_pusher(), *[self.excutor() for _ in range(max_workers)]
         )
         loop = asyncio.get_event_loop()
         loop.run_until_complete(event)
-        # self.run_task_pusher()
-        # executor = ThreadPoolExecutor(max_workers=max_workers)
-        # try:
-        #     self.add_to_excutor(executor)
-        # except KeyboardInterrupt:
-        #     if not self.pusher_finished:
-        #         console_write("error", "Stopping pusher thread.")
-        #         self.pusher_finished = True
-        #         console_write("error", "Waitting pusher thread.")
-        #         self.pusher_thread.join()
-
-        #     console_write("error", "Waitting worker threads.")
-        #     self.clear_all_futueres()
-        #     executor.shutdown()
-
-        #     console_write("error", "Clearing queues.")
-        #     self.sleep_queue.queue.clear()
-        #     self.task_queue.queue.clear()
-        #     self.taskdone_queue.queue.clear()
-
-        #     console_write("error", "Closing bars.")
-        #     self.bar_manager.exit()

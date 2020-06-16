@@ -1,13 +1,16 @@
-import asyncio
 import os
 import random
 from json.decoder import JSONDecodeError
 
+import aiostream
 from httpx import HTTPError
 
 from .. import ahttpx
-from ..client.google import (FileSystemServiceAccountTokenBackend,
-                             FileSystemTokenBackend, GoogleDrive)
+from ..client.google import (
+    FileSystemServiceAccountTokenBackend,
+    FileSystemTokenBackend,
+    GoogleDrive,
+)
 from ..error import TaskExistError, TaskFailError
 from ..utils import aenumerate, console_write, data_iter, iter_path, norm_path
 
@@ -175,8 +178,10 @@ class GoogleDriveTransferManager:
                 base_folder_id = self.path_dict[dir_path]
 
                 has_folder = (
-                    await client.get_files_by_name(
-                        base_folder_id, dir_name, fields=("files/id",)
+                    (
+                        await client.get_files_by_name(
+                            base_folder_id, dir_name, fields=("files/id",)
+                        )
                     )
                     .json()
                     .get("files")
@@ -186,7 +191,7 @@ class GoogleDriveTransferManager:
                     folder_id = has_folder[0].get("id")
                 else:
                     folder_id = (
-                        await client.create_file_by_name(base_folder_id, dir_name)
+                        (await client.create_file_by_name(base_folder_id, dir_name))
                         .json()
                         .get("id")
                     )
@@ -204,11 +209,13 @@ class GoogleDriveTransferManager:
         dir_path, name = os.path.split(path)
         parent_dir_id = await self._get_dir_id(client, dir_path)
         is_file = (
-            await client.get_files_by_name(
-                parent_dir_id,
-                name,
-                mime="file",
-                fields=("files/id", "files/name", "files/mimeType", "files/size"),
+            (
+                await client.get_files_by_name(
+                    parent_dir_id,
+                    name,
+                    mime="file",
+                    fields=("files/id", "files/name", "files/mimeType", "files/size"),
+                )
             )
             .json()
             .get("files", [])
@@ -218,7 +225,7 @@ class GoogleDriveTransferManager:
 
     async def _list_dirs(self, path, page_token=None, client=None):
         try:
-            client = client or await self._get_client()
+            client = client or self._get_client()
 
             abs_path = norm_path(self.root_path, path)
             dir_id = await self._get_dir_id(client, abs_path)
@@ -261,13 +268,11 @@ class GoogleDriveTransferManager:
             if next_token:
                 async for item in self._list_dirs(path, next_token, client):
                     yield item
-            # if next_token:
-            #     yield from self._list_dirs(path, next_token, client)
-            await asyncio.gather(
-                *[self._list_dirs(folder_path) for folder_path in folders]
-            )
-            # for folder_path in folders:
-            #     yield from self._list_dirs(folder_path)
+
+            async for item in aiostream.stream.merge(
+                [self._list_dirs(folder_path) for folder_path in folders]
+            ):
+                yield item
 
         except Exception as e:
             console_write(mode="error", message="{}: {}".format(path, str(e)))

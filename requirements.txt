@@ -1,6 +1,7 @@
 aiofiles
-httpx
 aiotimeout
+aiostream
+httpx
 tqdm
 colorama
 pyjwt

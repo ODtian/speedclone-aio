@@ -1,6 +1,6 @@
-import asyncio
 from urllib.parse import parse_qs, unquote
 
+import aiostream
 import httpx
 
 from ..utils import console_write
@@ -20,9 +20,6 @@ class OneDriveShareTransferDownloadTask:
         r.raise_for_status()
         async for chunk in r.aiter_bytes(chunk_size=chunk_size):
             yield chunk
-        # with self.s.get(self.url, stream=True, **self.http) as r:
-        #     r.raise_for_status()
-        #     yield from r.iter_content(chunk_size=chunk_size)
 
     def get_relative_path(self):
         return self.relative_path
@@ -53,7 +50,6 @@ class OneDriveShareTransferManager:
     def __init__(self, path, is_folder):
         self.path = path
         self.is_folder = is_folder
-        # self.s = requests.Session()
 
         split_url = self.path.lstrip("http://").lstrip("https://").split("/")
         tenant_name, account_name = split_url[0], split_url[4]
@@ -76,30 +72,6 @@ class OneDriveShareTransferManager:
         self.base_list_params = {
             "@a1": "'{folder}'".format(folder=self.base_document_path)
         }
-
-        self.ref_path = (
-            self.s.get(self.path)
-            .history[0]
-            .headers["Location"]
-            .split("/")[7]
-            .split("&")[0]
-            .lstrip("onedrive.aspx?id=")
-        )
-
-        if self.is_folder:
-            self.ref_path = "/" + "/".join(self.ref_path.split("%2F")[4:])
-
-            self.list_data["parameters"].update(
-                {
-                    "AllowMultipleValueFilterForTaxonomyFields": True,
-                    "RenderOptions": 464647,
-                }
-            )
-        else:
-            file_xml = self.file_xml.format(file_path=unquote(self.ref_path, "utf-8"))
-            self.list_data["parameters"].update(
-                {"ViewXml": file_xml, "RenderOptions": 12295}
-            )
 
     async def _iter_items(self, ref_path, add_params=None):
         try:
@@ -144,9 +116,10 @@ class OneDriveShareTransferManager:
                 async for item in self._iter_items(ref_path, add_params=params):
                     yield item
 
-            await asyncio.gather(
-                *[self._list_dirs(folder_path) for folder_path in folders]
-            )
+            async for item in aiostream.stream.merge(
+                [self._list_dirs(folder_path) for folder_path in folders]
+            ):
+                yield item
 
         except Exception as e:
             console_write(mode="error", message="{}: {}".format(ref_path, str(e)))
