@@ -171,7 +171,11 @@ class GoogleDrive:
 
     async def get_upload_url(self, parent_id, name):
         exist_file = (
-            self.get_files_by_name(parent_id, name, mime="file", fields=("files/kind",))
+            (
+                await self.get_files_by_name(
+                    parent_id, name, mime="file", fields=("files/kind",)
+                )
+            )
             .json()
             .get("files", [])
         )
@@ -212,7 +216,11 @@ class GoogleDrive:
 
     async def copy_to(self, source_id, dest_id, name):
         exist_file = (
-            self.get_files_by_name(dest_id, name, mime="file", fields=("files/kind",))
+            (
+                await self.get_files_by_name(
+                    dest_id, name, mime="file", fields=("files/kind",)
+                )
+            )
             .json()
             .get("files", [])
         )
