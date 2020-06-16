@@ -39,7 +39,7 @@ class TransferManager:
         self.bar_manager.error(e)
 
     async def handle_exists(self, e):
-        await self.bar_manager.exists(e)
+        self.bar_manager.exists(e)
 
     async def handle_fail(self, e):
         await self.put_task(e.task)
