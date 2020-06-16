@@ -66,6 +66,8 @@ class TransferManager:
                 task = await self.task_queue.get()
         except asyncio.TimeoutError:
             return
+        except Exception:
+            pass
         else:
             return task
 
