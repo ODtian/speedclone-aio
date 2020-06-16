@@ -139,7 +139,7 @@ class GoogleDrive:
 
     async def get_files_by_p(self, params):
         headers = await self.get_headers()
-        r = ahttpx.get(
+        r = await ahttpx.get(
             self.drive_url, headers=headers, params=self.get_params(params), **self.http
         )
         return r

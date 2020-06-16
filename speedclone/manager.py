@@ -1,14 +1,7 @@
-# from concurrent.futures import CancelledError, ThreadPoolExecutor
-# from queue import Empty, Queue
-# from threading import Thread
 import asyncio
 import time
 
-import aiotimeout
-
 from .error import TaskExistError, TaskFailError, TaskSleepError
-
-# from .utils import console_write
 
 
 class TransferManager:
@@ -62,7 +55,9 @@ class TransferManager:
 
     async def get_task(self):
         try:
-            task = await asyncio.wait_for(self.task_queue.get(), timeout=self.sleep_time)
+            task = await asyncio.wait_for(
+                self.task_queue.get(), timeout=self.sleep_time or 0.01
+            )
         except asyncio.TimeoutError:
             return
         else:
