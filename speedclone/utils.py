@@ -2,27 +2,11 @@
 import os
 import time
 
+import aiostream
 from colorama import Fore, init
 from tqdm.autonotebook import tqdm
 
 init()
-
-
-# class DataIter:
-#     def __init__(self, file_piece, step_size, bar):
-#         self.bar = bar
-#         self.step_size = step_size
-#         self.file_piece = file_piece
-
-#     def __iter__(self):
-#         while self.file_piece:
-#             step = self.file_piece[: self.step_size]
-#             yield step
-#             self.bar.update(len(step))
-#             self.file_piece = self.file_piece[self.step_size :]
-
-#     def __len__(self):
-#         return len(self.file_piece)
 
 
 def norm_path(*path):
@@ -86,3 +70,9 @@ async def aenumerate(asequence, start=0):
     async for elem in asequence:
         yield n, elem
         n += 1
+
+
+async def aiter_bytes(asequence, chunk_size=1024):
+    with aiostream.stream.chunks(asequence, n=chunk_size).stream() as streamer:
+        async for data in streamer:
+            yield b"".join(data)

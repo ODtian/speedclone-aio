@@ -19,6 +19,7 @@ class TaskFailError(TaskException):
     ):
         super().__init__(**kwargs)
         self.exce = exce
+        self.msg += "" if self.msg else str(type(self.exce))
 
 
 class TaskExistError(TaskException):
@@ -26,7 +27,9 @@ class TaskExistError(TaskException):
         self, **kwargs,
     ):
         if "msg" not in kwargs.keys():
-            t = kwargs.get("task")
-            msg = "{}: File already exists".format(t.get_relative_path())
+            msg = "{}: File already exists".format(
+                kwargs.get("task").get_relative_path()
+            )
             kwargs["msg"] = msg
+
         super().__init__(**kwargs)

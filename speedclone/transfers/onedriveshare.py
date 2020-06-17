@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, unquote
 import aiostream
 import httpx
 
-from ..utils import console_write
+from ..utils import aiter_bytes, console_write
 
 
 class OneDriveShareTransferDownloadTask:
@@ -18,8 +18,8 @@ class OneDriveShareTransferDownloadTask:
     async def iter_data(self, chunk_size=(10 * 1024 ** 2)):
         r = await self.s.get(self.url, stream=True, **self.http)
         r.raise_for_status()
-        async for chunk in r.aiter_bytes(chunk_size=chunk_size):
-            yield chunk
+        async for data in aiter_bytes(r.aiter_bytes(), chunk_size=chunk_size):
+            yield data
 
     def get_relative_path(self):
         return self.relative_path
@@ -116,10 +116,11 @@ class OneDriveShareTransferManager:
                 async for item in self._iter_items(ref_path, add_params=params):
                     yield item
 
-            async for item in aiostream.stream.merge(
-                [self._list_dirs(folder_path) for folder_path in folders]
-            ):
-                yield item
+            async with aiostream.stream.merge(
+                *[self._list_dirs(folder_path) for folder_path in folders]
+            ).stream() as streamer:
+                async for item in streamer:
+                    yield item
 
         except Exception as e:
             console_write(mode="error", message="{}: {}".format(ref_path, str(e)))

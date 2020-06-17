@@ -12,7 +12,14 @@ from ..client.google import (
     GoogleDrive,
 )
 from ..error import TaskExistError, TaskFailError
-from ..utils import aenumerate, console_write, data_iter, iter_path, norm_path
+from ..utils import (
+    aenumerate,
+    aiter_bytes,
+    console_write,
+    data_iter,
+    iter_path,
+    norm_path,
+)
 
 
 class GoogleDriveTransferDownloadTask:
@@ -30,7 +37,7 @@ class GoogleDriveTransferDownloadTask:
         else:
             r = await self.client.get_download_request(self.file_id)
             r.raise_for_status()
-            async for data in r.aiter_bytes(chunk_size=chunk_size):
+            async for data in aiter_bytes(r.aiter_bytes(), chunk_size=chunk_size):
                 yield data
 
     def get_relative_path(self):
@@ -269,10 +276,11 @@ class GoogleDriveTransferManager:
                 async for item in self._list_dirs(path, next_token, client):
                     yield item
 
-            async for item in aiostream.stream.merge(
-                [self._list_dirs(folder_path) for folder_path in folders]
-            ):
-                yield item
+            async with aiostream.stream.merge(
+                *[self._list_dirs(folder_path) for folder_path in folders]
+            ).stream() as streamer:
+                async for item in streamer:
+                    yield item
 
         except Exception as e:
             console_write(mode="error", message="{}: {}".format(path, str(e)))

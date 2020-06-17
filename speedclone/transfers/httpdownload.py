@@ -5,6 +5,7 @@ import aiofiles
 import requests
 
 from .. import ahttpx
+from ..utils import aiter_bytes
 
 
 class HttpTransferDownloadTask:
@@ -17,8 +18,8 @@ class HttpTransferDownloadTask:
 
     async def iter_data(self, chunk_size=(10 * 1024 ** 2)):
         self.r.raise_for_status()
-        async for chunk in self.r.aiter_bytes(chunk_size=chunk_size):
-            yield chunk
+        async for data in aiter_bytes(self.r.aiter_bytes(), chunk_size=chunk_size):
+            yield data
 
     def get_relative_path(self):
         return self.relative_path
