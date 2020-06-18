@@ -76,7 +76,7 @@ class GoogleDriveTransferUploadTask:
                     e.response.json().get("error", {}).get("message", "Empty message")
                 )
             except JSONDecodeError:
-                message = ""
+                message = "No json response returned."
             raise Exception("HttpError {}: {}".format(status_code, message))
 
     async def _do_copy(self, folder_id, name):
