@@ -88,10 +88,10 @@ class TransferManager:
             self.task_done()
 
     def start_loop(self, loop):
-        def loop():
+        def loop_runner():
             loop.run_forever()
 
-        self.loop_thread = Thread(target=loop)
+        self.loop_thread = Thread(target=loop_runner)
         self.loop_thread.start()
 
     def add_to_loop(excutor, loop):
