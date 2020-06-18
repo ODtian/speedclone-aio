@@ -18,15 +18,19 @@ else:
 
 
 class TransferManager:
-    def __init__(self, download_manager, upload_manager, bar_manager, sleep_time):
+    def __init__(
+        self, download_manager, upload_manager, bar_manager, sleep_time, max_workers
+    ):
         self.download_manager = download_manager
         self.upload_manager = upload_manager
         self.bar_manager = bar_manager
 
         self.sleep_time = sleep_time
+        self.max_workers = max_workers
 
         self.loop_thread = None
-        # self.task_queue = asyncio.Queue()
+        self.sem = asyncio.Semaphore(self.max_workers)
+
         self.pusher_finished = False
         self.task_queue = Queue()
         self.now_task = 0
@@ -71,21 +75,22 @@ class TransferManager:
         return self.now_task == 0 and self.pusher_finished
 
     async def excutor(self, task):
-        worker = await self.upload_manager.get_worker(task)
-        bar = self.bar_manager.get_bar(task)
+        async with self.sem:
+            worker = await self.upload_manager.get_worker(task)
+            bar = self.bar_manager.get_bar(task)
 
-        try:
-            await worker(bar)
-        except TaskSleepError as e:
-            await self.handle_sleep(e)
-        except TaskExistError as e:
-            await self.handle_exists(e)
-        except TaskFailError as e:
-            await self.handle_fail(e)
-        except Exception as e:
-            await self.handle_error(e)
-        finally:
-            self.task_done()
+            try:
+                await worker(bar)
+            except TaskSleepError as e:
+                await self.handle_sleep(e)
+            except TaskExistError as e:
+                await self.handle_exists(e)
+            except TaskFailError as e:
+                await self.handle_fail(e)
+            except Exception as e:
+                await self.handle_error(e)
+            finally:
+                self.task_done()
 
     def start_loop(self, loop):
         def loop_runner():
