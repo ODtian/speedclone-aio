@@ -24,12 +24,12 @@ class TransferManager:
         self.bar_manager = bar_manager
 
         self.sleep_time = sleep_time
-        self.pusher_finished = False
 
+        self.loop_thread = None
         # self.task_queue = asyncio.Queue()
+        self.pusher_finished = False
         self.task_queue = Queue()
         self.now_task = 0
-        self.loop_thread = None
 
     async def put_task(self, task):
         self.now_task += 1
