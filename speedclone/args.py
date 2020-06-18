@@ -50,8 +50,6 @@ def parse_args():
         help="Size of single request in multiple chunk uploading.",
     )
 
-
-
     parser.add_argument(
         "--max-page-size",
         default=100,

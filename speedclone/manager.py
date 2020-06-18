@@ -1,7 +1,20 @@
 import asyncio
 import time
+from queue import Empty, Queue
+from threading import Thread
 
 from .error import TaskExistError, TaskFailError, TaskSleepError
+from .utils import console_write
+
+try:
+    import uvloop
+except ImportError:
+    console_write(
+        "sleep",
+        "[info] Module uvloop is not installed, use default loop instead. Using uvloop can bring significant performance improvement, install it by 'pip install uvloop'.",
+    )
+else:
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 class TransferManager:
@@ -13,18 +26,14 @@ class TransferManager:
         self.sleep_time = sleep_time
         self.pusher_finished = False
 
-        self.task_queue = asyncio.Queue()
+        # self.task_queue = asyncio.Queue()
+        self.task_queue = Queue()
         self.now_task = 0
+        self.loop_thread = None
 
     async def put_task(self, task):
         self.now_task += 1
-        _worker = await self.upload_manager.get_worker(task)
-        bar = self.bar_manager.get_bar(task)
-
-        async def worker():
-            return await _worker(bar)
-
-        await self.task_queue.put(worker)
+        self.task_queue.put(task)
 
     def task_done(self):
         self.now_task -= 1
@@ -50,45 +59,62 @@ class TransferManager:
             await self.put_task(task)
         self.pusher_finished = True
 
-    def finished(self):
-        return self.now_task == 0 and self.pusher_finished
-
-    async def get_task(self):
+    def get_task(self):
         try:
-            task = await asyncio.wait_for(
-                self.task_queue.get(), timeout=self.sleep_time or 0.01
-            )
-        except asyncio.TimeoutError:
+            task = self.task_queue.get(timeout=self.sleep_time)
+        except Empty:
             return
         else:
             return task
 
-    async def excutor(self):
+    def finished(self):
+        return self.now_task == 0 and self.pusher_finished
+
+    async def excutor(self, task):
+        worker = await self.upload_manager.get_worker(task)
+        bar = self.bar_manager.get_bar(task)
+
+        try:
+            await worker(bar)
+        except TaskSleepError as e:
+            await self.handle_sleep(e)
+        except TaskExistError as e:
+            await self.handle_exists(e)
+        except TaskFailError as e:
+            await self.handle_fail(e)
+        except Exception as e:
+            await self.handle_error(e)
+        finally:
+            self.task_done()
+
+    def start_loop(self, loop):
+        def loop():
+            loop.run_forever()
+
+        self.loop_thread = Thread(target=loop)
+        self.loop_thread.start()
+
+    def add_to_loop(excutor, loop):
+        asyncio.run_coroutine_threadsafe(excutor, loop)
+
+    def run_loop(self, loop):
         while True:
             if self.finished():
                 break
             else:
-                worker = await self.get_task()
-                if not worker:
+                task = self.get_task()
+                if not task:
                     continue
-
-                try:
-                    await worker()
-                except TaskSleepError as e:
-                    await self.handle_sleep(e)
-                except TaskExistError as e:
-                    await self.handle_exists(e)
-                except TaskFailError as e:
-                    await self.handle_fail(e)
-                except Exception as e:
-                    await self.handle_error(e)
-                finally:
-                    self.task_done()
-                    await asyncio.sleep(self.sleep_time)
+                self.add_to_loop(self.excutor(task), loop)
+            time.sleep(self.sleep_time)
 
     def run(self, max_workers=10):
-        event = asyncio.gather(
-            self.task_pusher(), *[self.excutor() for _ in range(max_workers)]
-        )
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(event)
+        try:
+            self.start_loop(loop)
+            self.add_to_loop(self.task_pusher(), loop)
+            self.run_loop(loop)
+        except KeyboardInterrupt:
+            console_write("exists", "Stopping loop.")
+        finally:
+            loop.stop()
