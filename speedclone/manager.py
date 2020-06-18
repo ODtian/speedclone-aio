@@ -94,7 +94,7 @@ class TransferManager:
         self.loop_thread = Thread(target=loop_runner)
         self.loop_thread.start()
 
-    def add_to_loop(excutor, loop):
+    def add_to_loop(self, excutor, loop):
         asyncio.run_coroutine_threadsafe(excutor, loop)
 
     def run_loop(self, loop):
