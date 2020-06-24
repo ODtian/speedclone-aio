@@ -35,63 +35,63 @@ class TransferManager:
         self.task_queue = Queue()
         self.now_task = 0
 
-    async def handle_sleep(self, e):
-        await self.put_task(e.task)
+    def handle_sleep(self, e):
+        self.put_task(e.task)
         time.sleep(e.sleep_time)
         self.bar_manager.sleep(e)
 
-    async def handle_error(self, e, task):
-        await self.put_task(task)
+    def handle_error(self, e, task):
+        self.put_task(task)
         self.bar_manager.error(e)
 
-    async def handle_exists(self, e):
+    def handle_exists(self, e):
         self.bar_manager.exists(e)
 
-    async def handle_fail(self, e):
-        await self.put_task(e.task)
+    def handle_fail(self, e):
+        self.put_task(e.task)
         self.bar_manager.fail(e)
 
-    async def task_pusher(self):
-        async for task in self.download_manager.iter_tasks():
-            _worker = await self.upload_manager.get_worker(task)
-            bar = self.bar_manager.get_bar(task)
-
-            async def worker():
-                return await _worker(bar)
-
-            await self.put_task(worker)
-        self.pusher_finished = True
-
-    async def put_task(self, task):
+    def put_task(self, task):
         self.now_task += 1
         self.task_queue.put(task)
 
     def task_done(self):
         self.now_task -= 1
 
-    def get_task(self):
+    def finished(self):
+        return self.now_task == 0 and self.pusher_finished
+
+    async def task_pusher(self):
+        async for task in self.download_manager.iter_tasks():
+            self.put_task(task)
+        self.pusher_finished = True
+
+    async def get_task(self):
         try:
             task = self.task_queue.get(timeout=self.sleep_time)
         except Empty:
             return
         else:
-            return task
+            _worker = await self.upload_manager.get_worker(task)
+            bar = self.bar_manager.get_bar(task)
 
-    def finished(self):
-        return self.now_task == 0 and self.pusher_finished
+            async def worker():
+                return await _worker(bar)
+
+            return worker
 
     async def excutor(self, task):
         async with self.sem:
             try:
                 await task()
             except TaskSleepError as e:
-                await self.handle_sleep(e)
+                self.handle_sleep(e)
             except TaskExistError as e:
-                await self.handle_exists(e)
+                self.handle_exists(e)
             except TaskFailError as e:
-                await self.handle_fail(e)
+                self.handle_fail(e)
             except Exception as e:
-                await self.handle_error(e, task)
+                self.handle_error(e, task)
             finally:
                 self.task_done()
 
@@ -105,12 +105,12 @@ class TransferManager:
     def add_to_loop(self, excutor, loop):
         asyncio.run_coroutine_threadsafe(excutor, loop)
 
-    def run_loop(self, loop):
+    async def run_loop(self, loop):
         while True:
             if self.finished():
                 break
             else:
-                task = self.get_task()
+                task = await self.get_task()
                 if not task:
                     continue
                 self.add_to_loop(self.excutor(task), loop)
@@ -121,7 +121,7 @@ class TransferManager:
         try:
             self.start_loop(loop)
             self.add_to_loop(self.task_pusher(), loop)
-            self.run_loop(loop)
+            asyncio.new_event_loop().run_until_complete(self.run_loop(loop))
         except KeyboardInterrupt:
             console_write("exists", "Stopping loop.")
         finally:
