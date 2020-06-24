@@ -125,4 +125,5 @@ class TransferManager:
         except KeyboardInterrupt:
             console_write("exists", "Stopping loop.")
         finally:
+            print(1)
             loop.stop()
