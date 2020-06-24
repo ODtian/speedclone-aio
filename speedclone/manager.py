@@ -56,7 +56,7 @@ class TransferManager:
             _worker = await self.upload_manager.get_worker(task)
             bar = self.bar_manager.get_bar(task)
 
-            def worker():
+            async def worker():
                 return await _worker(bar)
 
             await self.put_task(worker)
