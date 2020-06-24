@@ -113,7 +113,7 @@ class TransferManager:
                 self.add_to_loop(self.excutor(task), loop)
             time.sleep(self.sleep_time)
 
-    def run(self, max_workers=10):
+    def run(self):
         loop = asyncio.get_event_loop()
         try:
             self.start_loop(loop)
