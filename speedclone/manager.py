@@ -35,20 +35,13 @@ class TransferManager:
         self.task_queue = Queue()
         self.now_task = 0
 
-    async def put_task(self, task):
-        self.now_task += 1
-        self.task_queue.put(task)
-
-    def task_done(self):
-        self.now_task -= 1
-
     async def handle_sleep(self, e):
         await self.put_task(e.task)
         time.sleep(e.sleep_time)
         self.bar_manager.sleep(e)
 
-    async def handle_error(self, e):
-        await self.put_task(e.task)
+    async def handle_error(self, e, task):
+        await self.put_task(task)
         self.bar_manager.error(e)
 
     async def handle_exists(self, e):
@@ -62,6 +55,13 @@ class TransferManager:
         async for task in self.download_manager.iter_tasks():
             await self.put_task(task)
         self.pusher_finished = True
+
+    async def put_task(self, task):
+        self.now_task += 1
+        self.task_queue.put(task)
+
+    def task_done(self):
+        self.now_task -= 1
 
     def get_task(self):
         try:
@@ -88,7 +88,7 @@ class TransferManager:
             except TaskFailError as e:
                 await self.handle_fail(e)
             except Exception as e:
-                await self.handle_error(e)
+                await self.handle_error(e, task)
             finally:
                 self.task_done()
 
