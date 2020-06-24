@@ -53,7 +53,13 @@ class TransferManager:
 
     async def task_pusher(self):
         async for task in self.download_manager.iter_tasks():
-            await self.put_task(task)
+            _worker = await self.upload_manager.get_worker(task)
+            bar = self.bar_manager.get_bar(task)
+
+            def worker():
+                return await _worker(bar)
+
+            await self.put_task(worker)
         self.pusher_finished = True
 
     async def put_task(self, task):
@@ -76,11 +82,8 @@ class TransferManager:
 
     async def excutor(self, task):
         async with self.sem:
-            worker = await self.upload_manager.get_worker(task)
-            bar = self.bar_manager.get_bar(task)
-
             try:
-                await worker(bar)
+                await task()
             except TaskSleepError as e:
                 await self.handle_sleep(e)
             except TaskExistError as e:
