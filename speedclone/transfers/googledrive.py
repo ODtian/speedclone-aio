@@ -178,16 +178,16 @@ class GoogleDriveTransferManager:
     #     for p in path.split("/"):
     #         now += "/" + p
     #         yield now
-    def _split_path(self, path):
-        temp_path = path.split("/")
-        name = temp_path.pop()
-        return "/".join(temp_path), name
+    # def _split_path(self, path):
+    #     temp_path = path.split("/")
+    #     name = temp_path.pop()
+    #     return "/".join(temp_path), name
 
     async def _get_dir_id(self, path):
         client = self._get_client()
 
-        parent_path, name = self._split_path(path)
-        # os.path.split(path)
+        parent_path, name = os.path.split(path)
+        # self._split_path(path)
         parent_id = await self._get_cache_dir_id(parent_path)
 
         has_folder = (
@@ -206,7 +206,7 @@ class GoogleDriveTransferManager:
         return folder_id
 
     async def _get_cache_dir_id(self, path):
-        return self.dir_cache.get(path, (await self._get_dir_id(path)))
+        return self.dir_cache.get(path) or await self._get_dir_id(path)
 
     # async def _get_dir_id(self, client, path):
     #     for p in self._reduce_path(path):
