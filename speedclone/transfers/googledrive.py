@@ -173,21 +173,10 @@ class GoogleDriveTransferManager:
             else:
                 return client
 
-    # def _reduce_path(self, path):
-    #     now = ""
-    #     for p in path.split("/"):
-    #         now += "/" + p
-    #         yield now
-    # def _split_path(self, path):
-    #     temp_path = path.split("/")
-    #     name = temp_path.pop()
-    #     return "/".join(temp_path), name
-
     async def _get_dir_id(self, path):
         client = self._get_client()
 
         parent_path, name = os.path.split(path)
-        # self._split_path(path)
         parent_id = await self._get_cache_dir_id(parent_path)
 
         has_folder = (
@@ -195,6 +184,7 @@ class GoogleDriveTransferManager:
             .json()
             .get("files")
         )
+
         if has_folder:
             folder_id = has_folder[0].get("id")
         else:
@@ -207,33 +197,6 @@ class GoogleDriveTransferManager:
 
     async def _get_cache_dir_id(self, path):
         return self.dir_cache.get(path) or await self._get_dir_id(path)
-
-    # async def _get_dir_id(self, client, path):
-    #     for p in self._reduce_path(path):
-    #         if self.path_dict.get(p) is None:
-    #             dir_path, dir_name = os.path.split(p)
-    #             base_folder_id = self.path_dict[dir_path]
-
-    #             has_folder = (
-    #                 (
-    #                     await client.get_files_by_name(
-    #                         base_folder_id, dir_name, fields=("files/id",)
-    #                     )
-    #                 )
-    #                 .json()
-    #                 .get("files")
-    #             )
-
-    #             if has_folder:
-    #                 folder_id = has_folder[0].get("id")
-    #             else:
-    #                 folder_id = (
-    #                     (await client.create_file_by_name(base_folder_id, dir_name))
-    #                     .json()
-    #                     .get("id")
-    #                 )
-    #             self.path_dict[p] = folder_id
-    #     return self.path_dict[p]
 
     async def _get_root_name(self):
         client = self._get_client()
