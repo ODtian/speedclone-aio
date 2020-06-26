@@ -200,7 +200,7 @@ class GoogleDriveTransferManager:
 
     async def _get_root_name(self):
         client = self._get_client()
-        root_id = self.dir_cache["/"]
+        root_id = self.dir_cache[""]
         r = await client.get_file(root_id, "name")
         return r.json()["name"]
 
