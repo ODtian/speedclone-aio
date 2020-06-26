@@ -183,7 +183,7 @@ class GoogleDriveTransferManager:
         client = self._get_client()
 
         parent_path, name = os.path.split(path)
-        parent_id = await self._get_dir_id(parent_path)
+        parent_id = await self._get_cache_dir_id(parent_path)
 
         has_folder = (
             (await client.get_files_by_name(parent_id, name, fields=("files/id",)))
@@ -239,7 +239,7 @@ class GoogleDriveTransferManager:
     async def _list_files(self, path):
         client = self._get_client()
         dir_path, name = os.path.split(path)
-        parent_dir_id = await self._get_dir_id(client, dir_path)
+        parent_dir_id = await self._get_ceche_dir_id(dir_path)
         is_file = (
             (
                 await client.get_files_by_name(
@@ -260,7 +260,7 @@ class GoogleDriveTransferManager:
             client = client or self._get_client()
 
             abs_path = norm_path(self.root_path, path)
-            dir_id = await self._get_dir_id(client, abs_path)
+            dir_id = await self._get_cache_dir_id(abs_path)
 
             p = {
                 "q": " and ".join(
@@ -380,7 +380,7 @@ class GoogleDriveTransferManager:
         dir_path, name = os.path.split(total_path)
         try:
             client = self._get_client()
-            dir_id = await self._get_dir_id(client, dir_path)
+            dir_id = await self._get_cache_dir_id(dir_path)
 
             async def worker(bar):
                 w = GoogleDriveTransferUploadTask(task, bar, client)
