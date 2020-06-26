@@ -160,7 +160,7 @@ class GoogleDriveTransferManager:
     def __init__(self, path, clients, root):
         self.path = path
         self.clients = clients
-        self.dir_cache = {"/": root}
+        self.dir_cache = {"": root}
         self.list_files_set = set()
         self.root_path, self.base_name = os.path.split(self.path)
 
