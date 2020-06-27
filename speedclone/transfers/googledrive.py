@@ -207,7 +207,7 @@ class GoogleDriveTransferManager:
     async def _list_files(self, path):
         client = self._get_client()
         dir_path, name = os.path.split(path)
-        parent_dir_id = await self._get_ceche_dir_id(dir_path)
+        parent_dir_id = await self._get_cache_dir_id(dir_path)
         is_file = (
             (
                 await client.get_files_by_name(

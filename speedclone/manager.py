@@ -126,3 +126,4 @@ class TransferManager:
             console_write("exists", "Stopping loop.")
         finally:
             loop.call_soon_threadsafe(loop.stop)
+            self.task_queue.queue.clear()
