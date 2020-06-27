@@ -122,8 +122,6 @@ class TransferManager:
             self.start_loop(loop)
             self.add_to_loop(self.task_pusher(), loop)
             asyncio.new_event_loop().run_until_complete(self.run_loop(loop))
-        except KeyboardInterrupt:
-            console_write("exists", "Stopping loop.")
         finally:
             loop.call_soon_threadsafe(loop.stop)
             self.task_queue.queue.clear()
