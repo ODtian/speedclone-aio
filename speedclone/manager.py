@@ -78,6 +78,7 @@ class TransferManager:
             async def worker():
                 return await _worker(bar)
 
+            worker._task = task
             return worker
 
     async def excutor(self, task):
@@ -91,7 +92,7 @@ class TransferManager:
             except TaskFailError as e:
                 self.handle_fail(e)
             except Exception as e:
-                self.handle_error(e, task)
+                self.handle_error(e, task._task)
             finally:
                 self.task_done()
 
