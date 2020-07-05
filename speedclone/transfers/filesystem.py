@@ -45,7 +45,7 @@ class FileSystemTransferUploadTask:
 
             self.bar.init_bar(self.task.get_total(), self.task.get_relative_path())
 
-            async with open(total_path, "wb") as f:
+            async with aiofiles.open(total_path, "wb") as f:
                 async for data in self.task.iter_data(chunk_size=self.chunk_size):
                     while data:
                         step = data[: self.step_size]

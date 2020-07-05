@@ -1,29 +1,51 @@
 from httpx import AsyncClient
 
 
-async def request(
-    method: str,
-    url,
-    *,
-    params=None,
-    data=None,
-    files=None,
-    json=None,
-    headers=None,
-    cookies=None,
-    auth=None,
-    timeout=None,
-    allow_redirects=True,
-    verify=True,
-    cert=None,
-    trust_env=True,
-    proxies=None,
-    stream=False
-):
-    async with AsyncClient(
-        cert=cert, verify=verify, timeout=timeout, trust_env=trust_env, proxies=proxies
-    ) as client:
-        return await getattr(client, "stream" if stream else "request")(
+class Client:
+    def __init__(self):
+        self._client = None
+
+    async def _create_client(
+        self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
+    ):
+        async with AsyncClient(
+            cert=cert,
+            verify=verify,
+            timeout=timeout,
+            trust_env=trust_env,
+            proxies=proxies,
+        ) as client:
+            return client
+
+    async def request(
+        self,
+        method: str,
+        url,
+        *,
+        params=None,
+        data=None,
+        files=None,
+        json=None,
+        headers=None,
+        cookies=None,
+        auth=None,
+        timeout=None,
+        allow_redirects=True,
+        verify=True,
+        cert=None,
+        trust_env=True,
+        proxies=None,
+        stream=False
+    ):
+        if not self._client:
+            self._client = await self._create_client(
+                cert=cert,
+                verify=verify,
+                timeout=timeout,
+                trust_env=trust_env,
+                proxies=proxies,
+            )
+        return await getattr(self._client, "stream" if stream else "request")(
             method=method,
             url=url,
             data=data,
@@ -35,6 +57,9 @@ async def request(
             auth=auth,
             allow_redirects=allow_redirects,
         )
+
+
+CLIENT = Client()
 
 
 async def get(
@@ -52,7 +77,7 @@ async def get(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "GET",
         url,
         params=params,
@@ -83,7 +108,7 @@ async def options(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "OPTIONS",
         url,
         params=params,
@@ -114,7 +139,7 @@ async def head(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "HEAD",
         url,
         params=params,
@@ -148,7 +173,7 @@ async def post(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "POST",
         url,
         data=data,
@@ -185,7 +210,7 @@ async def put(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "PUT",
         url,
         data=data,
@@ -222,7 +247,7 @@ async def patch(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "PATCH",
         url,
         data=data,
@@ -256,7 +281,7 @@ async def delete(
     proxies=None,
     stream=False
 ):
-    return await request(
+    return await CLIENT.request(
         "DELETE",
         url,
         params=params,
