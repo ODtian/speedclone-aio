@@ -96,17 +96,17 @@ class TransferManager:
             finally:
                 self.task_done()
 
-    def start_loop(self, loop):
+    def start_loop(self):
         def loop_runner():
-            loop.run_forever()
+            asyncio.get_event_loop().run_forever()
 
         self.loop_thread = Thread(target=loop_runner)
         self.loop_thread.start()
 
-    def add_to_loop(self, excutor, loop):
-        asyncio.run_coroutine_threadsafe(excutor, loop)
+    def add_to_loop(self, excutor):
+        return asyncio.run_coroutine_threadsafe(excutor, asyncio.get_event_loop())
 
-    async def run_loop(self, loop):
+    async def run_loop(self):
         while True:
             if self.finished():
                 break
@@ -114,15 +114,18 @@ class TransferManager:
                 task = await self.get_task()
                 if not task:
                     continue
-                self.add_to_loop(self.excutor(task), loop)
+                self.add_to_loop(self.excutor(task))
             time.sleep(self.sleep_time)
 
     def run(self):
-        loop = asyncio.get_event_loop()
+        # loop = asyncio.get_event_loop()
         try:
-            self.start_loop(loop)
-            self.add_to_loop(self.task_pusher(), loop)
-            asyncio.get_event_loop().run_until_complete(self.run_loop(loop))
+            self.start_loop()
+            self.add_to_loop(self.task_pusher())
+            self.add_to_loop(self.run_loop()).result()
+
+            # asyncio.get_event_loop().run_until_complete(self.run_loop(loop))
         finally:
-            loop.call_soon_threadsafe(loop.stop)
+            loop = asyncio.get_event_loop()
+            loop.get_event_loop().call_soon_threadsafe(loop.stop)
             self.task_queue.queue.clear()
