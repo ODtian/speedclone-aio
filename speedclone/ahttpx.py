@@ -5,19 +5,20 @@ from httpx import AsyncClient
 
 class Client:
     def __init__(self, clients_size=10):
-        self._client = []
+        self._clients = []
         self.size = clients_size
 
-    def _create_client(
+    async def _create_client(
         self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
     ):
-        return AsyncClient(
+        async with AsyncClient(
             cert=cert,
             verify=verify,
             timeout=timeout,
             trust_env=trust_env,
             proxies=proxies,
-        )
+        ) as client:
+            return client
 
     async def request(
         self,
@@ -39,28 +40,28 @@ class Client:
         proxies=None,
         stream=False
     ):
-        if len(self._client) < self.size:
-            self._client = [
-                self._create_client(
-                    cert=cert,
-                    verify=verify,
-                    timeout=timeout,
-                    trust_env=trust_env,
-                    proxies=proxies,
-                )
-                for _ in range(self.size)
-            ]
-            # client = await self._create_client(
-            #     cert=cert,
-            #     verify=verify,
-            #     timeout=timeout,
-            #     trust_env=trust_env,
-            #     proxies=proxies,
-            # )
-            # self._client.append(client)
+        if len(self._clients) < self.size:
+            # self._client = [
+            #     self._create_client(
+            #         cert=cert,
+            #         verify=verify,
+            #         timeout=timeout,
+            #         trust_env=trust_env,
+            #         proxies=proxies,
+            #     )
+            #     for _ in range(self.size)
+            # ]
+            client = await self._create_client(
+                cert=cert,
+                verify=verify,
+                timeout=timeout,
+                trust_env=trust_env,
+                proxies=proxies,
+            )
+            self._clients.append(client)
 
         return await getattr(
-            random.choice(self._client), "stream" if stream else "request"
+            random.choice(self._clients), "stream" if stream else "request"
         )(
             method=method,
             url=url,
