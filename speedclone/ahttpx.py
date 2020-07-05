@@ -1,9 +1,12 @@
+import random
+
 from httpx import AsyncClient
 
 
 class Client:
-    def __init__(self):
-        self._client = None
+    def __init__(self, clients_size=10):
+        self._client = []
+        self.size = clients_size
 
     async def _create_client(
         self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
@@ -37,15 +40,19 @@ class Client:
         proxies=None,
         stream=False
     ):
-        if not self._client:
-            self._client = await self._create_client(
+        if len(self._client) < self.size:
+            client = await self._create_client(
                 cert=cert,
                 verify=verify,
                 timeout=timeout,
                 trust_env=trust_env,
                 proxies=proxies,
             )
-        return await getattr(self._client, "stream" if stream else "request")(
+            self._client.append(client)
+
+        return await getattr(
+            random.choice(self._client), "stream" if stream else "request"
+        )(
             method=method,
             url=url,
             data=data,
