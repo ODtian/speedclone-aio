@@ -66,9 +66,6 @@ class Client:
         )
 
 
-CLIENT = Client()
-
-
 async def get(
     url,
     *,
@@ -302,3 +299,7 @@ async def delete(
         trust_env=trust_env,
         proxies=proxies,
     )
+
+
+CLIENTS_SIZE = 10
+CLIENT = Client(clients_size=CLIENTS_SIZE)
