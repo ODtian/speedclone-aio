@@ -3,66 +3,102 @@ import random
 from httpx import AsyncClient
 
 
-class Client:
-    def __init__(self, clients_size=10):
-        self._clients = []
-        self.size = clients_size
+# class Client:
+#     def __init__(self, clients_size=10):
+#         self._clients = []
+#         self.size = clients_size
 
-    async def _create_client(
-        self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
-    ):
-        async with AsyncClient(
-            cert=cert,
-            verify=verify,
-            timeout=timeout,
-            trust_env=trust_env,
-            proxies=proxies,
-        ) as client:
-            return client
+#     async def _create_client(
+#         self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
+#     ):
+#         async with AsyncClient(
+#             cert=cert,
+#             verify=verify,
+#             timeout=timeout,
+#             trust_env=trust_env,
+#             proxies=proxies,
+#         ) as client:
+#             return client
 
-    async def request(
-        self,
-        method: str,
-        url,
-        *,
-        params=None,
-        data=None,
-        files=None,
-        json=None,
-        headers=None,
-        cookies=None,
-        auth=None,
-        timeout=None,
-        allow_redirects=True,
-        verify=True,
-        cert=None,
-        trust_env=True,
-        proxies=None,
-        stream=False
-    ):
-        if len(self._clients) < self.size:
-            # self._client = [
-            #     self._create_client(
-            #         cert=cert,
-            #         verify=verify,
-            #         timeout=timeout,
-            #         trust_env=trust_env,
-            #         proxies=proxies,
-            #     )
-            #     for _ in range(self.size)
-            # ]
-            client = await self._create_client(
-                cert=cert,
-                verify=verify,
-                timeout=timeout,
-                trust_env=trust_env,
-                proxies=proxies,
-            )
-            self._clients.append(client)
+#     async def request(
+#         self,
+#         method: str,
+#         url,
+#         *,
+#         params=None,
+#         data=None,
+#         files=None,
+#         json=None,
+#         headers=None,
+#         cookies=None,
+#         auth=None,
+#         timeout=None,
+#         allow_redirects=True,
+#         verify=True,
+#         cert=None,
+#         trust_env=True,
+#         proxies=None,
+#         stream=False
+#     ):
+#         if len(self._clients) < self.size:
+#             # self._client = [
+#             #     self._create_client(
+#             #         cert=cert,
+#             #         verify=verify,
+#             #         timeout=timeout,
+#             #         trust_env=trust_env,
+#             #         proxies=proxies,
+#             #     )
+#             #     for _ in range(self.size)
+#             # ]
+#             client = await self._create_client(
+#                 cert=cert,
+#                 verify=verify,
+#                 timeout=timeout,
+#                 trust_env=trust_env,
+#                 proxies=proxies,
+#             )
+#             self._clients.append(client)
 
-        return await getattr(
-            random.choice(self._clients), "stream" if stream else "request"
-        )(
+#         return await getattr(
+#             random.choice(self._clients), "stream" if stream else "request"
+#         )(
+#             method=method,
+#             url=url,
+#             data=data,
+#             files=files,
+#             json=json,
+#             params=params,
+#             headers=headers,
+#             cookies=cookies,
+#             auth=auth,
+#             allow_redirects=allow_redirects,
+#         )
+
+
+async def request(
+    method: str,
+    url,
+    *,
+    params=None,
+    data=None,
+    files=None,
+    json=None,
+    headers=None,
+    cookies=None,
+    auth=None,
+    timeout=None,
+    allow_redirects=True,
+    verify=True,
+    cert=None,
+    trust_env=True,
+    proxies=None,
+    stream=False
+):
+    async with AsyncClient(
+        cert=cert, verify=verify, timeout=timeout, trust_env=trust_env, proxies=proxies,
+    ) as client:
+        return await getattr(client, "stream" if stream else "request")(
             method=method,
             url=url,
             data=data,
@@ -91,7 +127,7 @@ async def get(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "GET",
         url,
         params=params,
@@ -122,7 +158,7 @@ async def options(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "OPTIONS",
         url,
         params=params,
@@ -153,7 +189,7 @@ async def head(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "HEAD",
         url,
         params=params,
@@ -187,7 +223,7 @@ async def post(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "POST",
         url,
         data=data,
@@ -224,7 +260,7 @@ async def put(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "PUT",
         url,
         data=data,
@@ -261,7 +297,7 @@ async def patch(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "PATCH",
         url,
         data=data,
@@ -295,7 +331,7 @@ async def delete(
     proxies=None,
     stream=False
 ):
-    return await CLIENT.request(
+    return await request(
         "DELETE",
         url,
         params=params,
@@ -311,5 +347,5 @@ async def delete(
     )
 
 
-CLIENTS_SIZE = 10
-CLIENT = Client(clients_size=CLIENTS_SIZE)
+# CLIENTS_SIZE = 10
+# CLIENT = Client(clients_size=CLIENTS_SIZE)
