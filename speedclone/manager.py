@@ -126,5 +126,5 @@ class TransferManager:
 
             # asyncio.get_event_loop().run_until_complete(self.run_loop(loop))
         finally:
-            loop.get_event_loop().call_soon_threadsafe(loop.stop)
+            loop.call_soon_threadsafe(loop.stop)
             self.task_queue.queue.clear()
