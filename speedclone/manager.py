@@ -97,8 +97,10 @@ class TransferManager:
                 self.task_done()
 
     def start_loop(self):
+        loop = asyncio.get_event_loop()
+
         def loop_runner():
-            asyncio.get_event_loop().run_forever()
+            loop.run_forever()
 
         self.loop_thread = Thread(target=loop_runner)
         self.loop_thread.start()
