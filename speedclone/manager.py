@@ -1,6 +1,7 @@
 import asyncio
 import time
-from queue import Empty, Queue
+
+# from queue import Empty, Queue
 from threading import Thread
 
 from .error import TaskExistError, TaskFailError, TaskSleepError
@@ -32,28 +33,29 @@ class TransferManager:
         self.sem = asyncio.Semaphore(self.max_workers)
 
         self.pusher_finished = False
-        self.task_queue = Queue()
+        # self.task_queue = Queue()
+        self.task_queue = asyncio.Queue()
         self.now_task = 0
 
-    def handle_sleep(self, e):
-        self.put_task(e.task)
+    async def handle_sleep(self, e):
+        await self.put_task(e.task)
         time.sleep(e.sleep_time)
         self.bar_manager.sleep(e)
 
-    def handle_error(self, e, task):
-        self.put_task(task)
+    async def handle_error(self, e, task):
+        await self.put_task(task)
         self.bar_manager.error(e)
 
     def handle_exists(self, e):
         self.bar_manager.exists(e)
 
-    def handle_fail(self, e):
-        self.put_task(e.task)
+    async def handle_fail(self, e):
+        await self.put_task(e.task)
         self.bar_manager.fail(e)
 
-    def put_task(self, task):
+    async def put_task(self, task):
         self.now_task += 1
-        self.task_queue.put(task)
+        await self.task_queue.put(task)
 
     def task_done(self):
         self.now_task -= 1
@@ -63,13 +65,13 @@ class TransferManager:
 
     async def task_pusher(self):
         async for task in self.download_manager.iter_tasks():
-            self.put_task(task)
+            await self.put_task(task)
         self.pusher_finished = True
 
     async def get_task(self):
         try:
-            task = self.task_queue.get(timeout=self.sleep_time)
-        except Empty:
+            task = await self.task_queue.get_nowait()
+        except asyncio.QueueEmpty:
             return
         else:
             _worker = await self.upload_manager.get_worker(task)
@@ -78,7 +80,7 @@ class TransferManager:
             async def worker():
                 return await _worker(bar)
 
-            worker._task = task
+            worker.task = task
             return worker
 
     async def excutor(self, task):
@@ -86,13 +88,13 @@ class TransferManager:
             try:
                 await task()
             except TaskSleepError as e:
-                self.handle_sleep(e)
+                await self.handle_sleep(e)
             except TaskExistError as e:
                 self.handle_exists(e)
             except TaskFailError as e:
-                self.handle_fail(e)
+                await self.handle_fail(e)
             except Exception as e:
-                self.handle_error(e, task._task)
+                await self.handle_error(e, task.task)
             finally:
                 self.task_done()
 
@@ -115,7 +117,8 @@ class TransferManager:
                 if not task:
                     continue
                 self.add_to_loop(self.excutor(task), loop)
-            time.sleep(self.sleep_time)
+            # time.sleep(self.sleep_time)
+            await asyncio.sleep(self.sleep_time)
 
     def run(self):
         loop = asyncio.get_event_loop()
