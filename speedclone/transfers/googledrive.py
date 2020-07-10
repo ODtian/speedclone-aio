@@ -86,19 +86,19 @@ class GoogleDriveTransferUploadTask:
             )
 
         try:
-            file_size = self.task.get_total()
-            self.bar.init_bar(file_size, self.task.get_relative_path())
             async for file_id in self.task.iter_data(copy=True):
                 result = await self.client.copy_to(file_id, folder_id, name)
-                if result is not False:
-                    self._handle_request_error(result)
         except Exception as e:
             raise TaskFailError(exce=e, task=self.task, msg=str(e))
         else:
             if result is False:
                 raise TaskExistError(task=self.task)
+            else:
+                self._handle_request_error(result)
+
+            file_size = self.task.get_total()
+            self.bar.init_bar(file_size, self.task.get_relative_path())
             self.bar.update(file_size)
-        finally:
             self.bar.close()
 
     async def run(self, folder_id, name):
