@@ -97,8 +97,8 @@ class GoogleDriveTransferUploadTask:
         else:
             if result is False:
                 raise TaskExistError(task=self.task)
-        finally:
             self.bar.update(file_size)
+        finally:
             self.bar.close()
 
     async def run(self, folder_id, name):
