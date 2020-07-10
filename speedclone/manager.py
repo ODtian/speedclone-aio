@@ -110,6 +110,7 @@ class TransferManager:
 
     async def run_loop(self, loop):
         while True:
+            await asyncio.sleep(self.sleep_time)
             if self.finished():
                 break
             else:
@@ -118,7 +119,6 @@ class TransferManager:
                     continue
                 self.add_to_loop(self.excutor(task), loop)
             # time.sleep(self.sleep_time)
-            await asyncio.sleep(self.sleep_time)
 
     def run(self):
         loop = asyncio.get_event_loop()
@@ -130,4 +130,4 @@ class TransferManager:
             # asyncio.get_event_loop().run_until_complete(self.run_loop(loop))
         finally:
             loop.call_soon_threadsafe(loop.stop)
-            self.task_queue.queue.clear()
+            # self.task_queue.queue.clear()
