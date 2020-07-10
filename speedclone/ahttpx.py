@@ -8,10 +8,10 @@ class Client:
         self._client = None
         self.current_client_args = {}
 
-    async def _create_client(
+    def _create_client(
         self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
     ):
-        return await AsyncClient(
+        return AsyncClient(
             cert=cert,
             verify=verify,
             timeout=timeout,
@@ -58,7 +58,7 @@ class Client:
                 await self._client.__aexit__()
 
             self.current_client_args = client_args
-            self._client = await self._create_client(**self.current_client_args)
+            self._client = self._create_client(**self.current_client_args)
 
         return await getattr(self._client, "stream" if stream else "request")(
             method=method,

@@ -29,14 +29,12 @@ class TransferManager:
         self.sleep_time = sleep_time
         self.max_workers = max_workers
 
-        # self.loop_thread = None
         self.sem = asyncio.Semaphore(self.max_workers)
+        self.loop = asyncio.get_event_loop()
 
         self.pusher_finished = False
         self.task_queue = asyncio.Queue()
         self.now_task = 0
-
-        self.loop = asyncio.get_event_loop()
 
     async def handle_sleep(self, e):
         await self.put_task(e.task)
@@ -71,7 +69,7 @@ class TransferManager:
 
     async def get_task(self):
         try:
-            task = await self.task_queue.get_nowait()
+            task = self.task_queue.get_nowait()
         except asyncio.QueueEmpty:
             return
         else:
@@ -112,7 +110,6 @@ class TransferManager:
     def run_loop(self):
         while True:
             time.sleep(self.sleep_time)
-
             if self.finished():
                 break
             else:
