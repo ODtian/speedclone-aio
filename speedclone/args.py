@@ -16,6 +16,7 @@ def parse_args():
         help="Interval time when putting workers into thread pool.",
     )
     parser.add_argument("--workers", default=5, type=int, help="The number of workers.")
+    parser.add_argument("--clients", default=20, type=int, help="The number of clients.")
     parser.add_argument(
         "--bar", default="common", type=str, help="Name of the progress bar."
     )

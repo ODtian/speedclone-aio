@@ -324,7 +324,7 @@ class GoogleDriveTransferManager:
                 clients.append(client)
 
             random.shuffle(clients)
-            return cls(path=path, clients=clients, root=root)
+            return cls(path=path, clients=clients[:conf.get("clients", -1)], root=root)
         else:
             raise Exception("Token path not exists")
 
