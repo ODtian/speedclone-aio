@@ -19,6 +19,8 @@ else:
 
 
 class TransferManager:
+    me = None
+
     def __init__(
         self, download_manager, upload_manager, bar_manager, sleep_time, max_workers
     ):
@@ -35,6 +37,8 @@ class TransferManager:
         self.pusher_finished = False
         self.task_queue = asyncio.Queue()
         self.now_task = 0
+
+        TransferManager.me = self
 
     async def handle_sleep(self, e):
         await self.put_task(e.task)

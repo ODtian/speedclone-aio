@@ -1,5 +1,7 @@
+import asyncio
 import os
 import random
+from itertools import groupby
 from json.decoder import JSONDecodeError
 
 import aiostream
@@ -12,6 +14,7 @@ from ..client.google import (
     GoogleDrive,
 )
 from ..error import TaskExistError, TaskFailError
+from ..manager import TransferManager
 from ..utils import (
     aenumerate,
     aiter_bytes,
@@ -161,6 +164,8 @@ class GoogleDriveTransferManager:
         self.path = path
         self.clients = clients
         self.dir_cache = {"": root}
+        self.dir_create_list = []
+        self.dir_level = 0
         self.list_files_set = set()
         self.root_path, self.base_name = os.path.split(self.path)
 
@@ -260,10 +265,9 @@ class GoogleDriveTransferManager:
                     folders.append(relative_path)
                 else:
                     file_id = file.get("id", "")
-                    file_path = norm_path(self.root_name, relative_path)
                     file_size = int(file.get("size", 0))
 
-                    item = (file_id, file_path, file_size)
+                    item = (file_id, relative_path, file_size)
                     if item not in self.list_files_set:
                         self.list_files_set.add(item)
                         yield item
@@ -324,7 +328,7 @@ class GoogleDriveTransferManager:
                 clients.append(client)
 
             random.shuffle(clients)
-            return cls(path=path, clients=clients[:conf.get("clients", -1)], root=root)
+            return cls(path=path, clients=clients[: conf.get("clients", -1)], root=root)
         else:
             raise Exception("Token path not exists")
 
@@ -335,30 +339,56 @@ class GoogleDriveTransferManager:
             )
             return
 
-        self.root_name = "" if self.path else await self._get_root_name()
+        root_name = "" if self.path else await self._get_root_name()
 
         async for file_id, relative_path, size in self._list_dirs(self.base_name):
             yield GoogleDriveTransferDownloadTask(
-                file_id, relative_path, size, self._get_client()
+                file_id, norm_path(root_name, relative_path), size, self._get_client()
             )
 
     async def get_worker(self, task):
 
         total_path = norm_path(self.path, task.get_relative_path())
         dir_path, name = os.path.split(total_path)
-        try:
-            client = self._get_client()
+
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+
+        dir_level = dir_path.count("/")
+        if dir_level < self.dir_level:
             dir_id = await self._get_cache_dir_id(dir_path)
+            future.set_result(dir_id)
+        else:
+            self.dir_create_list.append((dir_path, future))
 
-            async def worker(bar):
-                w = GoogleDriveTransferUploadTask(task, bar, client)
-                await w.run(dir_id, name)
+            if dir_level > self.dir_level or TransferManager.me.pusher_finished:
+                sorted_list = sorted(self.dir_create_list, key=lambda item: item[0])
+                self.dir_level = dir_level
+                self.dir_create_list = []
 
-            return worker
-        except Exception as e:
-            _error = e
+                async def handle_dir_create():
+                    groups = groupby(sorted_list, key=lambda item: item[0])
 
-            async def worker(bar):
-                raise TaskFailError(exce=_error, task=task, msg=str(_error))
+                    for k, g in groups:
+                        dir_id = await self._get_cache_dir_id(k)
+                        for _, f in g:
+                            f.set_result(dir_id)
 
-            return worker
+                asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
+
+        # try:
+        client = self._get_client()
+
+        async def worker(bar):
+            dir_id = await future
+            w = GoogleDriveTransferUploadTask(task, bar, client)
+            await w.run(dir_id, name)
+
+        return worker
+        # except Exception as e:
+        #     _error = e
+
+        #     async def worker(bar):
+        #         raise TaskFailError(exce=_error, task=task, msg=str(_error))
+
+        #     return worker

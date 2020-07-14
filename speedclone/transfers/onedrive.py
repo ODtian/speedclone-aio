@@ -97,12 +97,12 @@ class OneDriveTransferManager:
 
     def _get_client(self):
         while True:
-            _client = self.clients[0]
-            self.clients = self.clients[1:] + self.clients[:1]
-            if _client.sleeping:
+            client = self.clients.pop(0)
+            self.clients.append(client)
+            if client.sleeping:
                 continue
             else:
-                return _client
+                return client
 
     @classmethod
     def get_transfer(cls, conf, path, args):
@@ -133,18 +133,18 @@ class OneDriveTransferManager:
     async def get_worker(self, task):
 
         total_path = norm_path(self.path, task.get_relative_path())
-        try:
-            client = self._get_client()
+        # try:
+        client = self._get_client()
 
-            async def worker(bar):
-                w = OneDriveTransferUploadTask(task, bar, client)
-                await w.run(total_path)
+        async def worker(bar):
+            w = OneDriveTransferUploadTask(task, bar, client)
+            await w.run(total_path)
 
-            return worker
-        except Exception as e:
-            _error = e
+        return worker
+        # except Exception as e:
+        #     _error = e
 
-            async def worker(bar):
-                raise TaskFailError(exce=_error, task=task, msg=str(_error))
+        #     async def worker(bar):
+        #         raise TaskFailError(exce=_error, task=task, msg=str(_error))
 
-            return worker
+        #     return worker
