@@ -1,7 +1,7 @@
 import asyncio
 import os
 import random
-# from itertools import groupby
+from itertools import groupby
 from json.decoder import JSONDecodeError
 
 import aiostream
@@ -14,7 +14,7 @@ from ..client.google import (
     GoogleDrive,
 )
 from ..error import TaskExistError, TaskFailError
-# from ..manager import TransferManager
+from ..manager import TransferManager
 from ..utils import (
     aenumerate,
     aiter_bytes,
@@ -164,9 +164,8 @@ class GoogleDriveTransferManager:
         self.path = path
         self.clients = clients
         self.dir_cache = {"": root}
-        self.dir_cache_update_lock = asyncio.Semaphore(1)
-        # self.dir_create_list = []
-        # self.dir_level = 0
+        self.dir_create_list = []
+        self.dir_level = 0
         self.list_files_set = set()
         self.root_path, self.base_name = os.path.split(self.path)
 
@@ -201,16 +200,8 @@ class GoogleDriveTransferManager:
         self.dir_cache[path] = folder_id
         return folder_id
 
-    async def _get_cache_dir_id(self, path, use_lock=False):
-        dir_id = self.dir_cache.get(path)
-        if dir_id:
-            return dir_id
-        elif use_lock:
-            async with self.dir_cache_update_lock:
-                return await self._get_dir_id(path)
-        else:
-            return await self._get_dir_id(path)
-        # return self.dir_cache.get(path) or await self._get_dir_id(path)
+    async def _get_cache_dir_id(self, path):
+        return self.dir_cache.get(path) or await self._get_dir_id(path)
 
     async def _get_root_name(self):
         client = self._get_client()
@@ -360,37 +351,36 @@ class GoogleDriveTransferManager:
         total_path = norm_path(self.path, task.get_relative_path())
         dir_path, name = os.path.split(total_path)
 
-        # loop = asyncio.get_event_loop()
-        # future = loop.create_future()
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
 
-        # dir_level = dir_path.count("/")
-        # if dir_level < self.dir_level:
-        #     dir_id = await self._get_cache_dir_id(dir_path)
-        #     future.set_result(dir_id)
-        # else:
-        #     self.dir_create_list.append((dir_path, future))
+        dir_level = dir_path.count("/")
+        if dir_level < self.dir_level:
+            dir_id = await self._get_cache_dir_id(dir_path)
+            future.set_result(dir_id)
+        else:
+            self.dir_create_list.append((dir_path, future))
 
-        #     if dir_level > self.dir_level or TransferManager.me.pusher_finished:
-        #         sorted_list = sorted(self.dir_create_list, key=lambda item: item[0])
-        #         self.dir_level = dir_level
-        #         self.dir_create_list = []
+            if dir_level > self.dir_level or TransferManager.me.pusher_finished:
+                sorted_list = sorted(self.dir_create_list, key=lambda item: item[0])
+                self.dir_level = dir_level
+                self.dir_create_list = []
 
-        #         async def handle_dir_create():
-        #             groups = groupby(sorted_list, key=lambda item: item[0])
+                async def handle_dir_create():
+                    groups = groupby(sorted_list, key=lambda item: item[0])
 
-        #             for k, g in groups:
-        #                 dir_id = await self._get_cache_dir_id(k)
-        #                 for _, f in g:
-        #                     f.set_result(dir_id)
+                    for k, g in groups:
+                        dir_id = await self._get_cache_dir_id(k)
+                        for _, f in g:
+                            f.set_result(dir_id)
 
-        #         asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
+                asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
 
         # try:
         client = self._get_client()
 
         async def worker(bar):
-            # dir_id = await future
-            dir_id = await self._get_cache_dir_id(dir_path, use_lock=True)
+            dir_id = await future
             w = GoogleDriveTransferUploadTask(task, bar, client)
             await w.run(dir_id, name)
 
