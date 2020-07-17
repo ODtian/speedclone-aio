@@ -2,6 +2,6 @@ aiofiles
 aiostream
 httpx
 tqdm
-colorama
 pyjwt
 cryptography
+colorlog
