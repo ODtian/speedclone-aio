@@ -2,9 +2,7 @@ from httpx import AsyncClient
 
 
 class Client:
-    me = None
-
-    def __init__(self, clients_size=10):
+    def __init__(self):
         self._client = None
         self.current_client_args = {}
 
@@ -19,9 +17,8 @@ class Client:
             proxies=proxies,
         )
 
-    @classmethod
     async def request(
-        cls,
+        self,
         method: str,
         url,
         *,
@@ -40,9 +37,6 @@ class Client:
         proxies=None,
         stream=False
     ):
-        if not cls.me:
-            cls.me = cls()
-        self = cls.me
 
         client_args = {
             "cert": cert,
@@ -109,6 +103,8 @@ class Client:
 #             allow_redirects=allow_redirects,
 #         )
 
+client = Client()
+
 
 async def get(
     url,
@@ -125,7 +121,7 @@ async def get(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "GET",
         url,
         params=params,
@@ -156,7 +152,7 @@ async def options(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "OPTIONS",
         url,
         params=params,
@@ -187,7 +183,7 @@ async def head(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "HEAD",
         url,
         params=params,
@@ -221,7 +217,7 @@ async def post(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "POST",
         url,
         data=data,
@@ -258,7 +254,7 @@ async def put(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "PUT",
         url,
         data=data,
@@ -295,7 +291,7 @@ async def patch(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "PATCH",
         url,
         data=data,
@@ -329,7 +325,7 @@ async def delete(
     proxies=None,
     stream=False
 ):
-    return await Client.request(
+    return await client.request(
         "DELETE",
         url,
         params=params,
