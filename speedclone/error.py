@@ -1,16 +1,7 @@
 class TaskException(Exception):
-    def __init__(self, task, msg, code=1):
+    def __init__(self, task, msg):
         self.task = task
         self.msg = msg
-        self.code = code
-
-
-class TaskSleepError(TaskException):
-    def __init__(
-        self, sleep_time, **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.sleep_time = sleep_time
 
 
 class TaskFailError(TaskException):
@@ -27,7 +18,7 @@ class TaskExistError(TaskException):
         self, **kwargs,
     ):
         if "msg" not in kwargs.keys():
-            msg = "{}: File already exists".format(
+            msg = "File already exists {}".format(
                 kwargs.get("task").get_relative_path()
             )
             kwargs["msg"] = msg

@@ -1,3 +1,4 @@
+import asyncio
 import os
 from urllib.parse import unquote
 
@@ -32,9 +33,12 @@ class HttpTransferDownloadTask:
             return 0
 
     @property
-    async def r(self):
+    def r(self):
         if not self._r:
-            self._r = await ahttpx.get(self.url, stream=True, **self.http)
+            loop = asyncio.get_event_loop()
+            self._r = asyncio.run_coroutine_threadsafe(
+                ahttpx.get(self.url, stream=True, **self.http), loop
+            ).result()
         return self._r
 
 

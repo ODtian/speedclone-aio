@@ -1,7 +1,8 @@
 import asyncio
+import logging
 import os
 import random
-from itertools import groupby
+from itertools import chain, groupby
 from json.decoder import JSONDecodeError
 
 import aiostream
@@ -14,14 +15,15 @@ from ..client.google import (
     GoogleDrive,
 )
 from ..error import TaskExistError, TaskFailError
-from ..manager import TransferManager
+
+# from ..manager import TransferManager
 from ..utils import (
-    aenumerate,
-    aiter_bytes,
-    console_write,
-    data_iter,
     iter_path,
     norm_path,
+    compose_path,
+    aenumerate,
+    aiter_bytes,
+    aiter_data,  # console_write,
 )
 
 
@@ -73,14 +75,13 @@ class GoogleDriveTransferUploadTask:
         try:
             request.raise_for_status()
         except HTTPError as e:
-            status_code = e.response.status_code
             try:
                 message = (
                     e.response.json().get("error", {}).get("message", "Empty message")
                 )
             except JSONDecodeError:
                 message = "No json response returned."
-            raise Exception("HttpError {}: {}".format(status_code, message))
+            raise Exception(message)
 
     async def _do_copy(self, folder_id, name):
         if self.client.sleeping:
@@ -92,6 +93,7 @@ class GoogleDriveTransferUploadTask:
             async for file_id in self.task.iter_data(copy=True):
                 result = await self.client.copy_to(file_id, folder_id, name)
         except Exception as e:
+            self.bar.close()
             raise TaskFailError(exce=e, task=self.task, msg=str(e))
         else:
             if result is False:
@@ -136,7 +138,7 @@ class GoogleDriveTransferUploadTask:
                     "Content-Range": "bytes {}-{}/{}".format(start, end, file_size),
                     "Content-Length": str(chunk_length),
                 }
-                data = data_iter(file_piece, self.step_size, self.bar)
+                data = aiter_data(file_piece, self.step_size, self.bar)
 
                 r = await ahttpx.put(
                     upload_url, data=data, headers=headers, **self.client.http
@@ -146,10 +148,12 @@ class GoogleDriveTransferUploadTask:
                 if r.status_code == 308:
                     header_range = r.headers.get("Range")
                     if not header_range or header_range.lstrip("bytes=0-") != str(end):
-                        raise Exception("Upload Error: Range missing")
+                        raise Exception(
+                            "Range missed when uploading file {} ".format(name)
+                        )
 
                 elif "id" not in r.json().keys():
-                    raise Exception("Upload Error: Upload not successful")
+                    raise Exception("Upload not successful {}".format(name))
 
         except Exception as e:
             raise TaskFailError(exce=e, task=self.task, msg=str(e))
@@ -163,11 +167,16 @@ class GoogleDriveTransferManager:
     def __init__(self, path, clients, root):
         self.path = path
         self.clients = clients
-        self.dir_cache = {"": root}
+
+        self.root, *self.base_path, self.base_name = self.path.split("/")
+        self.base_path = norm_path(*self.base_path)
+        # self.root = root
         self.dir_create_list = []
-        self.dir_level = 0
+        # self.dir_cache = {}
+        # self.dir_cache = {"": root}
+        # self.dir_create_list = []
+        # self.dir_level = 0
         self.list_files_set = set()
-        self.root_path, self.base_name = os.path.split(self.path)
 
     def _get_client(self):
         while True:
@@ -178,11 +187,32 @@ class GoogleDriveTransferManager:
             else:
                 return client
 
-    async def _get_dir_id(self, path):
+    # async def _create_dir(self, path):
+    #     client = self._get_client()
+
+    #     parent_path, name = os.path.split(path)
+    #     parent_id = await self._get_cache_dir_id(parent_path)
+
+    #     has_folder = (
+    #         (await client.get_files_by_name(parent_id, name, fields=("files/id",)))
+    #         .json()
+    #         .get("files")
+    #     )
+
+    #     if has_folder:
+    #         folder_id = has_folder[0].get("id")
+    #     else:
+    #         folder_id = (
+    #             (await client.create_file_by_name(parent_id, name)).json().get("id")
+    #         )
+
+    #     self.dir_cache[path] = folder_id
+    #     return folder_id
+    async def _create_dir(self, parent_id, name):
         client = self._get_client()
 
-        parent_path, name = os.path.split(path)
-        parent_id = await self._get_cache_dir_id(parent_path)
+        # parent_path, name = os.path.split(path)
+        # parent_id = await self._get_cache_dir_id(parent_path)
 
         has_folder = (
             (await client.get_files_by_name(parent_id, name, fields=("files/id",)))
@@ -193,20 +223,21 @@ class GoogleDriveTransferManager:
         if has_folder:
             folder_id = has_folder[0].get("id")
         else:
+            logging.debug("No folder found, creat one.")
             folder_id = (
                 (await client.create_file_by_name(parent_id, name)).json().get("id")
             )
 
-        self.dir_cache[path] = folder_id
+        # self.dir_cache[path] = folder_id
         return folder_id
 
-    async def _get_cache_dir_id(self, path):
-        return self.dir_cache.get(path) or await self._get_dir_id(path)
+    # async def _get_cache_dir_id(self, path):
+    #     return self.dir_cache.get(path) or await self._create_dir(path)
 
     async def _get_root_name(self):
         client = self._get_client()
-        root_id = self.dir_cache[""]
-        r = await client.get_file(root_id, "name")
+        # root_id = self.dir_cache[""]
+        r = await client.get_file(self.root, "name")
         return r.json()["name"]
 
     async def _list_files(self, path):
@@ -232,7 +263,7 @@ class GoogleDriveTransferManager:
         try:
             client = client or self._get_client()
 
-            abs_path = norm_path(self.root_path, path)
+            abs_path = norm_path(self.base_path, path)
             dir_id = await self._get_cache_dir_id(abs_path)
 
             p = {
@@ -283,8 +314,10 @@ class GoogleDriveTransferManager:
                 async for item in streamer:
                     yield item
 
-        except Exception as e:
-            console_write(mode="error", message="{}: {}".format(path, str(e)))
+        except Exception:
+            logging.error(
+                "Error occur when fetching files {}".format(path), exc_info=True
+            )
             async for item in self._list_dirs(path):
                 yield item
 
@@ -307,12 +340,12 @@ class GoogleDriveTransferManager:
         if os.path.exists(token_path):
             use_service_account = conf.get("service_account", False)
 
-            root = conf.get("root")
-
-            if conf.get("use_root_in_path"):
-                _path = path.split("/")
-                root = _path.pop(0)
-                path = "/".join(_path)
+            # root = conf.get("root")
+            path = norm_path(conf.get("root", ""), path)
+            # if conf.get("use_root_in_path"):
+            #     _path = path.split("/")
+            #     root = _path.pop(0)
+            #     path = "/".join(_path)
 
             drive = conf.get("drive_id")
             cred = conf.get("client")
@@ -328,7 +361,12 @@ class GoogleDriveTransferManager:
                 clients.append(client)
 
             random.shuffle(clients)
-            return cls(path=path, clients=clients[: conf.get("clients", -1)], root=root)
+
+            clients_num = conf.get("clients", 0)
+            if clients_num != 0:
+                clients = clients[:clients_num]
+            # return cls(path=path, clients=clients[: conf.get("clients", -1)], root=root)
+            return cls(path=path, clients=clients)
         else:
             raise Exception("Token path not exists")
 
@@ -353,28 +391,55 @@ class GoogleDriveTransferManager:
 
         loop = asyncio.get_event_loop()
         future = loop.create_future()
+        self.dir_create_list.append((dir_path, future))
 
-        dir_level = dir_path.count("/")
-        if dir_level < self.dir_level:
-            dir_id = await self._get_cache_dir_id(dir_path)
-            future.set_result(dir_id)
-        else:
-            self.dir_create_list.append((dir_path, future))
+        if getattr(task, "end", False):
 
-            if dir_level > self.dir_level or TransferManager.me.pusher_finished:
-                sorted_list = sorted(self.dir_create_list, key=lambda item: item[0])
-                self.dir_level = dir_level
-                self.dir_create_list = []
+            async def handle_dir_create():
+                sorted_dirs = sorted(
+                    set(
+                        chain.from_iterable(
+                            [compose_path(d) for d, _ in self.dir_create_list]
+                        )
+                    )
+                )
+                groups = groupby(sorted_dirs, key=lambda item: item.count("/"))
 
-                async def handle_dir_create():
-                    groups = groupby(sorted_list, key=lambda item: item[0])
+                dir_cache = {"": self.root}
 
-                    for k, g in groups:
-                        dir_id = await self._get_cache_dir_id(k)
-                        for _, f in g:
-                            f.set_result(dir_id)
+                async def _create_dir(dir_path):
+                    parent_path, name = os.path.split(dir_path)
+                    parent_id = dir_path.get(parent_path, self.root)
+                    dir_cache[dir_path] = await self._create_dir(parent_id, name)
 
-                asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
+                for _, g in groups:
+                    await asyncio.gather(*[_create_dir(d) for d in g])
+
+                for d, f in self.dir_create_list:
+                    f.set_result(dir_cache.get(d, self.root))
+
+            asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
+        # dir_level = dir_path.count("/")
+        # if dir_level < self.dir_level:
+        #     dir_id = await self._get_cache_dir_id(dir_path)
+        #     future.set_result(dir_id)
+        # else:
+        #     self.dir_create_list.append((dir_path, future))
+
+        #     if dir_level > self.dir_level or TransferManager.me.pusher_finished:
+        #         sorted_list = sorted(self.dir_create_list, key=lambda item: item[0])
+        #         self.dir_level = dir_level
+        #         self.dir_create_list = []
+
+        #         async def handle_dir_create():
+        #             groups = groupby(sorted_list, key=lambda item: item[0])
+
+        #             for k, g in groups:
+        #                 dir_id = await self._get_cache_dir_id(k)
+        #                 for _, f in g:
+        #                     f.set_result(dir_id)
+
+        #         asyncio.run_coroutine_threadsafe(handle_dir_create(), loop)
 
         # try:
         client = self._get_client()

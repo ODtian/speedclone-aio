@@ -1,31 +1,30 @@
 import importlib
-
+import logging
 from speedclone.args import parse_args
 from speedclone.manager import TransferManager
+from speedclone.log import init_logger
 
 TRANSFERS_BASE_IMPORT_PATH = "speedclone.transfers."
 BARS_BASE_IMPORT_PATH = "speedclone.bar."
 
 
 def handle_rest(s):
-    a = s.split(":/")
-    return a.pop(0), ":/".join(a)
+    r = s.split(":/")
+    return r.pop(0), ":/".join(r)
 
 
 def main():
     args, rest, config, transfers, bars = parse_args()
 
-    f, t = rest[0], rest[1]
-    f_name, f_path = handle_rest(f)
-    t_name, t_path = handle_rest(t)
+    f_name, f_path, t_name, t_path = map(handle_rest, rest)
 
     f_conf = config.get(f_name)
     t_conf = config.get(t_name)
 
     if not f_conf or not t_conf:
-        raise Exception(
+        logging.error(
             "Could not find config named '{}'".format(
-                "' and '".join(
+                "', '".join(
                     filter(
                         None, [("" if f_conf else f_name), ("" if t_conf else t_name)]
                     )
@@ -37,12 +36,11 @@ def main():
     t_trans_name = t_conf.get("transfer")
 
     if args.copy and (f_trans_name != "gd" or t_trans_name != "gd"):
-        raise Exception(
-            "Copy mode only support Google Drive, please check your config."
-        )
+        logging.error("Copy mode only support Google Drive, please check your config.")
 
     f_trans = transfers.get(f_trans_name)
     t_trans = transfers.get(t_trans_name)
+
     from_transfer = getattr(
         importlib.import_module(TRANSFERS_BASE_IMPORT_PATH + f_trans.get("mod")),
         f_trans.get("cls"),
@@ -63,10 +61,11 @@ def main():
         upload_manager=to_transfer,
         bar_manager=bar_manager,
         sleep_time=args.interval,
-        max_workers=args.workers
+        max_workers=args.workers,
     )
     transfer_manager.run()
 
 
 if __name__ == "__main__":
+    init_logger()
     main()

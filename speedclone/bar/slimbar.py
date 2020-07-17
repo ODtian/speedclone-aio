@@ -2,6 +2,24 @@ from tqdm.autonotebook import tqdm
 from .basebar import BaseBarManager
 
 
+class VirtualBar:
+    def __init__(self, bar, total):
+        self.bar = bar
+        self.counted = 0
+        self.total = 0
+
+    def init_bar(self, total, desc):
+        self.total = total
+
+    def update(self, n):
+        self.counted += n
+        self.bar.byte_bar.update(n)
+
+    def close(self):
+        self.bar.byte_bar.update(self.total - self.counted)
+        self.bar.count_bar.update(1)
+
+
 class SlimBar:
     def __init__(self):
         self.byte_bar = tqdm(
@@ -9,47 +27,25 @@ class SlimBar:
         )
         self.count_bar = tqdm(total=0, position=2, unit="tasks")
 
-    def init_bar(self, total, desc):
-        pass
+    def add_byte(self, n):
+        self.byte_bar.total += n
+        self.byte_bar.refresh()
 
-    def update_total(self, bar, n):
-        bar.total += n
-        bar.refresh()
-
-    def update(self, n):
-        self.byte_bar.update(n)
-
-    def close(self):
-        self.count_bar.update(1)
-
-    def close_bar(self):
-        self.count_bar.close()
-        self.byte_bar.close()
+    def add_count(self, n):
+        self.byte_bar.total += n
+        self.byte_bar.refresh()
 
 
 class SlimBarManager(BaseBarManager):
     def __init__(self):
         self.bar = SlimBar()
 
-    def update_total(self, task):
-        self.bar.update_total(self.bar.byte_bar, task.get_total())
-        self.bar.update_total(self.bar.count_bar, 1)
-
-    def update(self, task):
-        self.bar.update(task.get_total())
-        self.bar.close()
-
     def get_bar(self, task):
-        self.update_total(task)
-        return self.bar
-
-    def sleep(self, e):
-        super().sleep(e)
-        self.update(e.task)
+        self.bar.add_byte(task.get_total())
+        self.bar.add_count(1)
+        return VirtualBar(self.bar)
 
     def exists(self, e):
         super().exists(e)
-        self.update(e.task)
-
-    def exit(self):
-        self.bar.close_bar()
+        self.bar.byte_bar.update(e.task.get_total())
+        self.bar.count_bar.update(1)

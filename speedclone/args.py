@@ -16,7 +16,7 @@ def parse_args():
         help="Interval time when putting workers into thread pool.",
     )
     parser.add_argument("--workers", default=5, type=int, help="The number of workers.")
-    parser.add_argument("--clients", default=20, type=int, help="The number of clients.")
+    parser.add_argument("--clients", default=0, type=int, help="The number of clients.")
     parser.add_argument(
         "--bar", default="common", type=str, help="Name of the progress bar."
     )
@@ -77,6 +77,6 @@ def parse_args():
         for k in config.keys():
             config[k].update(args_dict)
 
-        return args, rest, config, transfers, bars
+        return args, rest[:2], config, transfers, bars
     else:
         raise Exception("Config file does not exist.")

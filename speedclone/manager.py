@@ -1,26 +1,28 @@
 import asyncio
 import time
+import logging
 
 # from queue import Empty, Queue
 from threading import Thread
 
-from .error import TaskExistError, TaskFailError, TaskSleepError
-from .utils import console_write
+from .error import TaskExistError, TaskFailError
+from .utils import aiter_with_end
 
 try:
     import uvloop
 except ImportError:
-    console_write(
-        "sleep",
-        "[info] Module uvloop is not installed, use default loop instead. Using uvloop can bring significant performance improvement, install it by 'pip install uvloop'.",
+    logging.warning(
+        "Uvloop is not installed, which can bring performance improvement. Install by 'pip install uvloop'."
     )
+    # console_write(
+    #     "sleep",
+    #     "[info] Module uvloop is not installed, use default loop instead. Using uvloop can bring significant performance improvement, install it by 'pip install uvloop'.",
+    # )
 else:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 class TransferManager:
-    me = None
-
     def __init__(
         self, download_manager, upload_manager, bar_manager, sleep_time, max_workers
     ):
@@ -38,23 +40,19 @@ class TransferManager:
         self.task_queue = asyncio.Queue()
         self.now_task = 0
 
-        TransferManager.me = self
+        # TransferManager.me = self
 
-    async def handle_sleep(self, e):
-        await self.put_task(e.task)
-        time.sleep(e.sleep_time)
-        self.bar_manager.sleep(e)
+    # async def handle_sleep(self, e):
+    #     await self.put_task(e.task)
+    #     time.sleep(e.sleep_time)
+    #     self.bar_manager.sleep(e)
 
-    async def handle_error(self, e, task):
-        await self.put_task(task)
+    async def handle_error(self, e, task=None):
+        await self.put_task(task or e.task)
         self.bar_manager.error(e)
 
     def handle_exists(self, e):
         self.bar_manager.exists(e)
-
-    async def handle_fail(self, e):
-        await self.put_task(e.task)
-        self.bar_manager.fail(e)
 
     async def put_task(self, task):
         self.now_task += 1
@@ -67,11 +65,13 @@ class TransferManager:
         return self.now_task == 0 and self.pusher_finished
 
     async def task_pusher(self):
-        async for task in self.download_manager.iter_tasks():
+        async for task, is_end in aiter_with_end(self.download_manager.iter_tasks()):
+            if is_end:
+                task.end = True
             await self.put_task(task)
         self.pusher_finished = True
 
-    async def get_task(self):
+    async def get_worker(self):
         try:
             task = self.task_queue.get_nowait()
         except asyncio.QueueEmpty:
@@ -86,18 +86,18 @@ class TransferManager:
             worker.task = task
             return worker
 
-    async def excutor(self, task):
+    async def excutor(self, worker):
         async with self.sem:
             try:
-                await task()
-            except TaskSleepError as e:
-                await self.handle_sleep(e)
+                await worker()
+            # except TaskSleepError as e:
+            #     await self.handle_sleep(e)
             except TaskExistError as e:
                 self.handle_exists(e)
             except TaskFailError as e:
                 await self.handle_fail(e)
             except Exception as e:
-                await self.handle_error(e, task.task)
+                await self.handle_error(e, worker.task)
             finally:
                 self.task_done()
 
@@ -117,10 +117,10 @@ class TransferManager:
             if self.finished():
                 break
             else:
-                task = self.add_to_loop(self.get_task()).result()
-                if not task:
+                worker = self.add_to_loop(self.get_worker()).result()
+                if not worker:
                     continue
-                self.add_to_loop(self.excutor(task))
+                self.add_to_loop(self.excutor(worker))
 
     def stop_loop(self):
         self.loop.call_soon_threadsafe(self.loop.stop)

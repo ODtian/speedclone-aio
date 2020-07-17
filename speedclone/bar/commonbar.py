@@ -15,7 +15,7 @@ class CommonBar:
         self.bar = self._create_bar(total)
 
     def update(self, n):
-        self.scroll_text()
+        self._scroll_text()
         self.bar.set_description_str(self.content[: self.max_width])
         self.bar.update(n)
 
@@ -23,9 +23,9 @@ class CommonBar:
         if self.bar:
             self.bar.close()
 
-    def scroll_text(self):
+    def _scroll_text(self):
         if self.step % self.slow == 0:
-            self.content = self.content[1:] + self.content[0]
+            self.content.append(self.content.pop(0))
         self.step += 1
 
     def _create_bar(self, total):
@@ -43,5 +43,4 @@ class CommonBar:
 
 class CommonBarManager(BaseBarManager):
     def get_bar(self, task):
-        bar = CommonBar()
-        return bar
+        return CommonBar()
