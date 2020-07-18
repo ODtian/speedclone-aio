@@ -16,7 +16,7 @@ def handle_rest(s):
 def main():
     args, rest, config, transfers, bars = parse_args()
 
-    f_name, f_path, t_name, t_path = map(handle_rest, rest)
+    (f_name, f_path), (t_name, t_path) = map(handle_rest, rest)
 
     f_conf = config.get(f_name)
     t_conf = config.get(t_name)
