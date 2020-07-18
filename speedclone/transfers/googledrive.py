@@ -168,8 +168,9 @@ class GoogleDriveTransferManager:
         self.path = path
         self.clients = clients
 
-        self.root, *self.base_path, self.base_name = self.path.split("/")
-        self.base_path = norm_path(*self.base_path)
+        # self.root, *self.base_path, self.base_name = self.path.split("/")
+        # self.base_path = norm_path(*self.base_path)
+        self.root, *self.base_path = self.path.split("/")
         # self.root = root
         self.dir_create_list = []
         # self.dir_cache = {}
@@ -208,68 +209,105 @@ class GoogleDriveTransferManager:
 
     #     self.dir_cache[path] = folder_id
     #     return folder_id
-    async def _create_dir(self, parent_id, name):
-        client = self._get_client()
 
-        # parent_path, name = os.path.split(path)
-        # parent_id = await self._get_cache_dir_id(parent_path)
+    # async def _create_dir(self, parent_id, name):
+    #     client = self._get_client()
 
-        has_folder = (
-            (await client.get_files_by_name(parent_id, name, fields=("files/id",)))
-            .json()
-            .get("files")
-        )
+    #     # parent_path, name = os.path.split(path)
+    #     # parent_id = await self._get_cache_dir_id(parent_path)
 
-        if has_folder:
-            folder_id = has_folder[0].get("id")
-        else:
-            logging.debug("No folder found, creat one.")
-            folder_id = (
-                (await client.create_file_by_name(parent_id, name)).json().get("id")
-            )
+    #     has_folder = (
+    #         (await client.get_files_by_name(parent_id, name, fields=("files/id",)))
+    #         .json()
+    #         .get("files")
+    #     )
 
-        # self.dir_cache[path] = folder_id
-        return folder_id
+    #     if has_folder:
+    #         folder_id = has_folder[0].get("id")
+    #     else:
+    #         logging.debug("No folder found, creat one.")
+    #         folder_id = (
+    #             (await client.create_file_by_name(parent_id, name)).json().get("id")
+    #         )
+
+    #     # self.dir_cache[path] = folder_id
+    #     return folder_id
+    # async def _get_dir_id(self, parent_id, name):
+    #     client = self._get_client()
+
+    #     # parent_path, name = os.path.split(path)
+    #     # parent_id = await self._get_cache_dir_id(parent_path)
+
+    #     has_folder = (
+    #         (
+    #             await client.get_files_by_name(
+    #                 parent_id, name, mime="folder", fields=("files/id",)
+    #             )
+    #         )
+    #         .json()
+    #         .get("files")
+    #     )
+
+    #     if has_folder:
+    #         folder_id = has_folder[0].get("id")
+    #     else:
+    #         logging.debug("No folder found, creat one.")
+    #         folder_id = (
+    #             (await client.create_file_by_name(parent_id, name, mime="folder"))
+    #             .json()
+    #             .get("id")
+    #         )
+
+    #     # self.dir_cache[path] = folder_id
+    #     return folder_id
 
     # async def _get_cache_dir_id(self, path):
     #     return self.dir_cache.get(path) or await self._create_dir(path)
 
-    async def _get_root_name(self):
-        client = self._get_client()
-        # root_id = self.dir_cache[""]
-        r = await client.get_file(self.root, "name")
-        return r.json()["name"]
+    # async def _get_root_name(self):
+    #     client = self._get_client()
+    #     # root_id = self.dir_cache[""]
+    #     r = await client.get_file(self.root, "name")
+    #     return r.json()["name"]
 
-    async def _list_files(self, path):
+    # async def _list_files(self, path):
+    #     client = self._get_client()
+    #     dir_path, name = os.path.split(path)
+    #     parent_dir_id = await self._get_cache_dir_id(dir_path)
+    #     is_file = (
+    #         (
+    #             await client.get_files_by_name(
+    #                 parent_dir_id,
+    #                 name,
+    #                 mime="file",
+    #                 fields=("files/id", "files/name", "files/mimeType", "files/size"),
+    #             )
+    #         )
+    #         .json()
+    #         .get("files", [])
+    #     )
+    #     for i in is_file:
+    #         yield i.get("id", ""), i.get("name", ""), int(i.get("size", 0))
+    async def _get_base_item(self):
         client = self._get_client()
-        dir_path, name = os.path.split(path)
-        parent_dir_id = await self._get_cache_dir_id(dir_path)
-        is_file = (
-            (
-                await client.get_files_by_name(
-                    parent_dir_id,
-                    name,
-                    mime="file",
-                    fields=("files/id", "files/name", "files/mimeType", "files/size"),
-                )
-            )
-            .json()
-            .get("files", [])
-        )
-        for i in is_file:
-            yield i.get("id", ""), i.get("name", ""), int(i.get("size", 0))
+        if self.base_path:
+            parent_id = self.root
+            for i in self.base_path.split("/"):
+                item = await client.get_file_by_name(parent_id, i)
+                parent_id = item["id"]
+            return item
+        else:
+            p = {"q": "id = {} and trashed = false".format(self.root)}
+            return await client.get_file_by_p(p).json().get("files", [None])[0]
 
-    async def _list_dirs(self, path, page_token=None, client=None):
+    async def _list_items(self, item, page_token=None, client=None):
         try:
             client = client or self._get_client()
-
-            abs_path = norm_path(self.base_path, path)
-            dir_id = await self._get_cache_dir_id(abs_path)
 
             p = {
                 "q": " and ".join(
                     ["'{parent_id}' in parents", "trashed = false"]
-                ).format(parent_id=dir_id),
+                ).format(parent_id=item["id"]),
                 "pageSize": self.max_page_size,
                 "fields": ", ".join(
                     (
@@ -285,41 +323,100 @@ class GoogleDriveTransferManager:
             if page_token:
                 p.update({"pageToken": page_token})
 
-            r = await client.get_files_by_p(p)
-            result = r.json()
+            r = await client.get_files_by_p(p).json()
 
-            folders = []
+            def fl(i):
+                i["name"] = norm_path(item["name"], i["name"])
 
-            for file in result.get("files", []):
-                relative_path = norm_path(path, file.get("name", ""))
-                if file["mimeType"] == "application/vnd.google-apps.folder":
-                    folders.append(relative_path)
+                if i["mimeType"] == "application/vnd.google-apps.folder":
+                    return True
                 else:
-                    file_id = file.get("id", "")
-                    file_size = int(file.get("size", 0))
+                    result = (i["id"], i["name"], int(i["size"]))
+                    if result not in self.list_files_set:
+                        self.list_files_set.add(result)
+                        yield result
 
-                    item = (file_id, relative_path, file_size)
-                    if item not in self.list_files_set:
-                        self.list_files_set.add(item)
-                        yield item
+            folders = filter(fl, r.get("files", []))
+            next_token = r.get("nextPageToken")
 
-            next_token = result.get("nextPageToken")
             if next_token:
-                async for item in self._list_dirs(path, next_token, client):
-                    yield item
+                async for i in self._list_dirs(item, next_token, client):
+                    yield i
 
             async with aiostream.stream.merge(
-                *[self._list_dirs(folder_path) for folder_path in folders]
+                *map(self._list_dirs, folders)
             ).stream() as streamer:
-                async for item in streamer:
-                    yield item
+                async for i in streamer:
+                    yield i
 
         except Exception:
             logging.error(
-                "Error occur when fetching files {}".format(path), exc_info=True
+                "Error occur when fetching files {}".format(item["name"]), exc_info=True
             )
-            async for item in self._list_dirs(path):
-                yield item
+            async for i in self._list_dirs(item):
+                yield i
+
+    # async def _list_dirs(self, path, page_token=None, client=None):
+    #     try:
+    #         client = client or self._get_client()
+
+    #         abs_path = norm_path(self.base_path, path)
+    #         dir_id = await self._get_cache_dir_id(abs_path)
+
+    #         p = {
+    #             "q": " and ".join(
+    #                 ["'{parent_id}' in parents", "trashed = false"]
+    #             ).format(parent_id=dir_id),
+    #             "pageSize": self.max_page_size,
+    #             "fields": ", ".join(
+    #                 (
+    #                     "nextPageToken",
+    #                     "files/id",
+    #                     "files/name",
+    #                     "files/size",
+    #                     "files/mimeType",
+    #                 )
+    #             ),
+    #         }
+
+    #         if page_token:
+    #             p.update({"pageToken": page_token})
+
+    #         r = await client.get_files_by_p(p)
+    #         result = r.json()
+
+    #         folders = []
+
+    #         for file in result.get("files", []):
+    #             relative_path = norm_path(path, file.get("name", ""))
+    #             if file["mimeType"] == "application/vnd.google-apps.folder":
+    #                 folders.append(relative_path)
+    #             else:
+    #                 file_id = file.get("id", "")
+    #                 file_size = int(file.get("size", 0))
+
+    #                 item = (file_id, relative_path, file_size)
+    #                 if item not in self.list_files_set:
+    #                     self.list_files_set.add(item)
+    #                     yield item
+
+    #         next_token = result.get("nextPageToken")
+    #         if next_token:
+    #             async for item in self._list_dirs(path, next_token, client):
+    #                 yield item
+
+    #         async with aiostream.stream.merge(
+    #             *[self._list_dirs(folder_path) for folder_path in folders]
+    #         ).stream() as streamer:
+    #             async for item in streamer:
+    #                 yield item
+
+    #     except Exception:
+    #         logging.error(
+    #             "Error occur when fetching files {}".format(path), exc_info=True
+    #         )
+    #         async for item in self._list_dirs(path):
+    #             yield item
 
     @classmethod
     def get_transfer(cls, conf, path, args):
@@ -340,13 +437,7 @@ class GoogleDriveTransferManager:
         if os.path.exists(token_path):
             use_service_account = conf.get("service_account", False)
 
-            # root = conf.get("root")
             path = norm_path(conf.get("root", ""), path)
-            # if conf.get("use_root_in_path"):
-            #     _path = path.split("/")
-            #     root = _path.pop(0)
-            #     path = "/".join(_path)
-
             drive = conf.get("drive_id")
             cred = conf.get("client")
 
@@ -363,26 +454,41 @@ class GoogleDriveTransferManager:
             random.shuffle(clients)
 
             clients_num = conf.get("clients", 0)
-            if clients_num != 0:
+            if clients_num > 0:
                 clients = clients[:clients_num]
-            # return cls(path=path, clients=clients[: conf.get("clients", -1)], root=root)
+
             return cls(path=path, clients=clients)
         else:
             raise Exception("Token path not exists")
 
     async def iter_tasks(self):
-        async for file_id, relative_path, size in self._list_files(self.path):
-            yield GoogleDriveTransferDownloadTask(
-                file_id, relative_path, size, self._get_client()
-            )
-            return
+        base_item = await self._get_base_item()
+        if base_item:
+            if base_item["mimeType"] != "application/vnd.google-apps.folder":
+                yield (
+                    base_item["id"],
+                    base_item["name"],
+                    int(base_item["size"]),
+                    self._get_client(),
+                )
+            else:
+                async for file_id, relative_path, size in self._list_items(base_item):
+                    yield GoogleDriveTransferDownloadTask(
+                        file_id, relative_path, size, self._get_client()
+                    )
 
-        root_name = "" if self.path else await self._get_root_name()
+        # # async for file_id, relative_path, size in self._list_files(self.path):
+        # #     yield GoogleDriveTransferDownloadTask(
+        # #         file_id, relative_path, size, self._get_client()
+        # #     )
+        # #     return
 
-        async for file_id, relative_path, size in self._list_dirs(self.base_name):
-            yield GoogleDriveTransferDownloadTask(
-                file_id, norm_path(root_name, relative_path), size, self._get_client()
-            )
+        # root_name = "" if self.path else await self._get_root_name()
+
+        # async for file_id, relative_path, size in self._list_dirs(self.base_name):
+        #     yield GoogleDriveTransferDownloadTask(
+        #         file_id, norm_path(root_name, relative_path), size, self._get_client()
+        #     )
 
     async def get_worker(self, task):
 
@@ -407,13 +513,40 @@ class GoogleDriveTransferManager:
 
                 dir_cache = {"": self.root}
 
-                async def _create_dir(dir_path):
+                async def create_dir(dir_path):
+                    client = self._get_client()
+
                     parent_path, name = os.path.split(dir_path)
-                    parent_id = dir_path.get(parent_path, self.root)
-                    dir_cache[dir_path] = await self._create_dir(parent_id, name)
+                    parent_id = dir_cache.get(parent_path, self.root)
+
+                    has_folder = (
+                        (
+                            await client.get_files_by_name(
+                                parent_id, name, mime="folder", fields=("files/id",)
+                            )
+                        )
+                        .json()
+                        .get("files")
+                    )
+
+                    folder_id = (
+                        has_folder[0].get("id")
+                        if has_folder
+                        else (
+                            (
+                                await client.create_file_by_name(
+                                    parent_id, name, mime="folder"
+                                )
+                            )
+                            .json()
+                            .get("id")
+                        )
+                    )
+
+                    dir_cache[dir_path] = folder_id
 
                 for _, g in groups:
-                    await asyncio.gather(*[_create_dir(d) for d in g])
+                    await asyncio.gather(*map(create_dir, g))
 
                 for d, f in self.dir_create_list:
                     f.set_result(dir_cache.get(d, self.root))
@@ -450,10 +583,3 @@ class GoogleDriveTransferManager:
             await w.run(dir_id, name)
 
         return worker
-        # except Exception as e:
-        #     _error = e
-
-        #     async def worker(bar):
-        #         raise TaskFailError(exce=_error, task=task, msg=str(_error))
-
-        #     return worker

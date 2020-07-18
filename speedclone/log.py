@@ -10,7 +10,7 @@ class TqdmHandler(logging.StreamHandler):
         tqdm.write(msg)
 
 
-def logger_init(level=logging.DEBUG):
+def init_logger(level=logging.DEBUG):
     logger = logging.getLogger("Global")
 
     handler = TqdmHandler()

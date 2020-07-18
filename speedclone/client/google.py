@@ -1,7 +1,9 @@
 import json
 import os
 import time
-from threading import Thread
+
+# from threading import Thread
+import asyncio
 
 import aiofiles
 import jwt
@@ -21,7 +23,7 @@ class FileSystemTokenBackend:
             with open(self.token_path, "r") as f:
                 self.token = json.load(f)
         else:
-            raise Exception("No token file found.")
+            raise ValueError("No token file found.")
 
     async def _update_tokenfile(self):
         async with aiofiles.open(self.token_path, "w") as f:
@@ -126,11 +128,17 @@ class GoogleDrive:
             )
         return params
 
-    async def create_file_by_name(
-        self, parent_id, name, mime="application/vnd.google-apps.folder"
-    ):
+    async def create_file_by_name(self, parent_id, name, mime=None):
         params = {"supportsAllDrives": "true"}
-        data = {"name": name, "parents": [parent_id], "mimeType": mime}
+        data = {"name": name, "parents": [parent_id]}
+        if mime:
+            data.update(
+                {
+                    "mimeType": "application/vnd.google-apps.folder"
+                    if mime == "folder"
+                    else mime
+                }
+            )
         headers = await self.get_headers()
         r = await ahttpx.post(
             self.drive_url, headers=headers, params=params, json=data, **self.http
@@ -147,8 +155,8 @@ class GoogleDrive:
     async def get_files_by_name(
         self,
         parent_id,
-        name=None,
-        mime="folder",
+        name,
+        mime=None,
         fields=("files/id", "files/name", "files/mimeType"),
     ):
         p = {
@@ -156,14 +164,14 @@ class GoogleDrive:
                 [
                     "'{parent_id}' in parents",
                     "name = '{name}'",
-                    "mimeType {mime} 'application/vnd.google-apps.folder'",
                     "trashed = false",
+                    "mimeType {} 'application/vnd.google-apps.folder'".format(
+                        "=" if mime == "folder" else "!="
+                    )
+                    if mime
+                    else "",
                 ]
-            ).format(
-                parent_id=parent_id,
-                name=name.replace("'", r"\'"),
-                mime=("=" if mime == "folder" else "!="),
-            ),
+            ).format(parent_id=parent_id, name=name.replace("'", r"\'")),
             "fields": ", ".join(fields),
         }
         r = await self.get_files_by_p(p)
@@ -194,13 +202,13 @@ class GoogleDrive:
         )
         return r
 
-    async def get_file(self, file_id, fields):
-        params = {"fields": fields, "supportsAllDrives": "true"}
-        headers = await self.get_headers()
-        r = await ahttpx.get(
-            self.drive_url + "/" + file_id, headers=headers, params=params, **self.http
-        )
-        return r
+    # async def get_file(self, file_id, fields):
+    #     params = {"fields": fields, "supportsAllDrives": "true"}
+    #     headers = await self.get_headers()
+    #     r = await ahttpx.get(
+    #         self.drive_url + "/" + file_id, headers=headers, params=params, **self.http
+    #     )
+    #     return r
 
     async def get_download_request(self, file_id):
         params = {"alt": "media", "supportsAllDrives": "true"}
@@ -242,13 +250,7 @@ class GoogleDrive:
     def sleep(self, seconds=None):
         if not seconds:
             seconds = self.sleep_time
-        if not self.sleeping:
-
-            def sleeper():
-                self.sleeping = True
-                time.sleep(seconds)
-                self.sleeping = False
-
-            t = Thread(target=sleeper)
-            t.start()
-        return seconds
+        try:
+            return seconds
+        finally:
+            asyncio.sleep(seconds)
