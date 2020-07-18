@@ -68,42 +68,49 @@ class Client:
         )
 
 
-# async def request(
-#     method: str,
-#     url,
-#     *,
-#     params=None,
-#     data=None,
-#     files=None,
-#     json=None,
-#     headers=None,
-#     cookies=None,
-#     auth=None,
-#     timeout=None,
-#     allow_redirects=True,
-#     verify=True,
-#     cert=None,
-#     trust_env=True,
-#     proxies=None,
-#     stream=False
-# ):
-#     async with AsyncClient(
-#         cert=cert, verify=verify, timeout=timeout, trust_env=trust_env, proxies=proxies,
-#     ) as client:
-#         return await getattr(client, "stream" if stream else "request")(
-#             method=method,
-#             url=url,
-#             data=data,
-#             files=files,
-#             json=json,
-#             params=params,
-#             headers=headers,
-#             cookies=cookies,
-#             auth=auth,
-#             allow_redirects=allow_redirects,
-#         )
-
 client = Client()
+
+# class client:
+#     @classmethod
+#     async def request(
+#         cls,
+#         method: str,
+#         url,
+#         *,
+#         params=None,
+#         data=None,
+#         files=None,
+#         json=None,
+#         headers=None,
+#         cookies=None,
+#         auth=None,
+#         timeout=None,
+#         allow_redirects=True,
+#         verify=True,
+#         cert=None,
+#         trust_env=True,
+#         proxies=None,
+#         stream=False
+#     ):
+#         async with AsyncClient(
+#             cert=cert,
+#             verify=verify,
+#             timeout=timeout,
+#             trust_env=trust_env,
+#             proxies=proxies,
+#         ) as client:
+#             return await getattr(client, "stream" if stream else "request")(
+#                 method=method,
+#                 url=url,
+#                 data=data,
+#                 files=files,
+#                 json=json,
+#                 params=params,
+#                 headers=headers,
+#                 cookies=cookies,
+#                 auth=auth,
+#                 allow_redirects=allow_redirects,
+#             )
 
 
 async def get(

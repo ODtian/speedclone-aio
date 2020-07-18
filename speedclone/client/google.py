@@ -128,31 +128,22 @@ class GoogleDrive:
             )
         return params
 
-    async def create_file_by_name(self, parent_id, name, mime=None):
-        params = {"supportsAllDrives": "true"}
-        data = {"name": name, "parents": [parent_id]}
-        if mime:
-            data.update(
-                {
-                    "mimeType": "application/vnd.google-apps.folder"
-                    if mime == "folder"
-                    else mime
-                }
-            )
+    async def get_file_by_id(self, file_id, fields=("id", "name", "mimeType")):
+        params = {"fields": ", ".join(fields), "supportsAllDrives": "true"}
         headers = await self.get_headers()
-        r = await ahttpx.post(
-            self.drive_url, headers=headers, params=params, json=data, **self.http
+        r = await ahttpx.get(
+            self.drive_url + "/" + file_id, headers=headers, params=params, **self.http
         )
         return r
 
-    async def get_files_by_p(self, params):
+    async def list_files_by_p(self, params):
         headers = await self.get_headers()
         r = await ahttpx.get(
             self.drive_url, headers=headers, params=self.get_params(params), **self.http
         )
         return r
 
-    async def get_files_by_name(
+    async def list_files_by_name(
         self,
         parent_id,
         name,
@@ -174,13 +165,30 @@ class GoogleDrive:
             ).format(parent_id=parent_id, name=name.replace("'", r"\'")),
             "fields": ", ".join(fields),
         }
-        r = await self.get_files_by_p(p)
+        r = await self.list_files_by_p(p)
+        return r
+
+    async def create_file_by_name(self, parent_id, name, mime=None):
+        params = {"supportsAllDrives": "true"}
+        data = {"name": name, "parents": [parent_id]}
+        if mime:
+            data.update(
+                {
+                    "mimeType": "application/vnd.google-apps.folder"
+                    if mime == "folder"
+                    else mime
+                }
+            )
+        headers = await self.get_headers()
+        r = await ahttpx.post(
+            self.drive_url, headers=headers, params=params, json=data, **self.http
+        )
         return r
 
     async def get_upload_url(self, parent_id, name):
         exist_file = (
             (
-                await self.get_files_by_name(
+                await self.list_files_by_name(
                     parent_id, name, mime="file", fields=("files/kind",)
                 )
             )
@@ -202,14 +210,6 @@ class GoogleDrive:
         )
         return r
 
-    # async def get_file(self, file_id, fields):
-    #     params = {"fields": fields, "supportsAllDrives": "true"}
-    #     headers = await self.get_headers()
-    #     r = await ahttpx.get(
-    #         self.drive_url + "/" + file_id, headers=headers, params=params, **self.http
-    #     )
-    #     return r
-
     async def get_download_request(self, file_id):
         params = {"alt": "media", "supportsAllDrives": "true"}
         headers = await self.get_headers()
@@ -225,7 +225,7 @@ class GoogleDrive:
     async def copy_to(self, source_id, dest_id, name):
         exist_file = (
             (
-                await self.get_files_by_name(
+                await self.list_files_by_name(
                     dest_id, name, mime="file", fields=("files/kind",)
                 )
             )

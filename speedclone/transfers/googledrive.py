@@ -293,12 +293,15 @@ class GoogleDriveTransferManager:
         if self.base_path:
             parent_id = self.root
             for i in self.base_path.split("/"):
-                item = await client.get_files_by_name(parent_id, i)
+                item = await client.list_files_by_name(parent_id, i)
                 parent_id = item["id"]
             return item
         else:
-            p = {"q": "id = {} and trashed = false".format(self.root)}
-            return (await client.get_files_by_p(p)).json().get("files", [None])[0]
+            r = await client.get_file_by_id(self.root)
+            if r.status_code == 200:
+                return r.json()
+            else:
+                return False
 
     async def _list_items(self, item, page_token=None, client=None):
         try:
@@ -323,7 +326,7 @@ class GoogleDriveTransferManager:
             if page_token:
                 p.update({"pageToken": page_token})
 
-            r = await client.get_files_by_p(p).json()
+            r = (await client.list_files_by_p(p)).json()
 
             def fl(i):
                 i["name"] = norm_path(item["name"], i["name"])
@@ -340,11 +343,11 @@ class GoogleDriveTransferManager:
             next_token = r.get("nextPageToken")
 
             if next_token:
-                async for i in self._list_dirs(item, next_token, client):
+                async for i in self._list_items(item, next_token, client):
                     yield i
 
             async with aiostream.stream.merge(
-                *map(self._list_dirs, folders)
+                *map(self._list_items, folders)
             ).stream() as streamer:
                 async for i in streamer:
                     yield i
@@ -353,8 +356,8 @@ class GoogleDriveTransferManager:
             logging.error(
                 "Error occur when fetching files {}".format(item["name"]), exc_info=True
             )
-            async for i in self._list_dirs(item):
-                yield i
+            # async for i in self._list_items(item):
+            #     yield i
 
     # async def _list_dirs(self, path, page_token=None, client=None):
     #     try:
@@ -521,7 +524,7 @@ class GoogleDriveTransferManager:
 
                     has_folder = (
                         (
-                            await client.get_files_by_name(
+                            await client.list_files_by_name(
                                 parent_id, name, mime="folder", fields=("files/id",)
                             )
                         )

@@ -65,11 +65,16 @@ class TransferManager:
         return self.now_task == 0 and self.pusher_finished
 
     async def task_pusher(self):
-        async for task, is_end in aiter_with_end(self.download_manager.iter_tasks()):
-            if is_end:
-                task.end = True
-            await self.put_task(task)
-        self.pusher_finished = True
+        try:
+            async for task, is_end in aiter_with_end(
+                self.download_manager.iter_tasks()
+            ):
+                if is_end:
+                    task.end = True
+                await self.put_task(task)
+            self.pusher_finished = True
+        except Exception:
+            logging.error("", exc_info=True)
 
     async def get_worker(self):
         try:
