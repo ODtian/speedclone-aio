@@ -293,12 +293,12 @@ class GoogleDriveTransferManager:
         if self.base_path:
             parent_id = self.root
             for i in self.base_path.split("/"):
-                item = await client.get_file_by_name(parent_id, i)
+                item = await client.get_files_by_name(parent_id, i)
                 parent_id = item["id"]
             return item
         else:
             p = {"q": "id = {} and trashed = false".format(self.root)}
-            return await client.get_file_by_p(p).json().get("files", [None])[0]
+            return await client.get_files_by_p(p).json().get("files", [None])[0]
 
     async def _list_items(self, item, page_token=None, client=None):
         try:
