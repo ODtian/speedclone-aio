@@ -298,7 +298,7 @@ class GoogleDriveTransferManager:
             return item
         else:
             p = {"q": "id = {} and trashed = false".format(self.root)}
-            return await client.get_files_by_p(p).json().get("files", [None])[0]
+            return (await client.get_files_by_p(p)).json().get("files", [None])[0]
 
     async def _list_items(self, item, page_token=None, client=None):
         try:
