@@ -164,7 +164,7 @@ class GoogleDriveTransferUploadTask:
 class GoogleDriveTransferManager:
     max_page_size = 100
 
-    def __init__(self, path, clients, root):
+    def __init__(self, path, clients):
         self.path = path
         self.clients = clients
 
