@@ -10,9 +10,7 @@ class TqdmHandler(logging.StreamHandler):
         tqdm.write(msg)
 
 
-def init_logger(level=logging.DEBUG):
-    logger = logging.getLogger("Global")
-
+def init_logger(level=logging.INFO):
     handler = TqdmHandler()
     handler.setFormatter(
         colorlog.ColoredFormatter(
@@ -20,13 +18,13 @@ def init_logger(level=logging.DEBUG):
             datefmt="%Y-%d-%d %H:%M:%S",
             log_colors={
                 "DEBUG": "cyan",
-                "INFO": "white",
-                "SUCCESS:": "green",
+                "INFO": "green",
                 "WARNING": "yellow",
                 "ERROR": "red",
                 "CRITICAL": "red,bg_white",
             },
         )
     )
+    logger = logging.getLogger()
     logger.addHandler(handler)
     logger.setLevel(level)

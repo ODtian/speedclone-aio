@@ -3,6 +3,7 @@ import json
 import os
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+args_dict = {}
 
 
 def parse_args():
@@ -11,44 +12,56 @@ def parse_args():
 
     parser.add_argument(
         "--interval",
-        default=0,
+        default=0.01,
         type=float,
         help="Interval time when putting workers into thread pool.",
     )
-    parser.add_argument("--workers", default=5, type=int, help="The number of workers.")
-    parser.add_argument("--clients", default=0, type=int, help="The number of clients.")
+
+    parser.add_argument(
+        "--max-workers", default=10, type=int, help="The number of workers."
+    )
+
     parser.add_argument(
         "--bar", default="common", type=str, help="Name of the progress bar."
     )
 
     parser.add_argument(
         "--conf",
-        default=os.path.join(BASE_DIR, "..", "speedclone.json"),
+        default=os.path.join(BASE_DIR, "..", "conf.json"),
         type=str,
         help="Path to the config file.",
     )
+
     parser.add_argument(
-        "--sleep",
-        default=0,
+        "--chunk-size",
+        default=20 * (1024 ** 2),
         type=int,
-        help="Time to sleep when client has been throttled.",
+        help="Size of single request in multiple chunk uploading.",
     )
-    parser.add_argument(
-        "--copy",
-        action="store_true",
-        help="Copy file through drive, can only use with Google Drive.",
-    )
+
     parser.add_argument(
         "--step-size",
-        default=1024 ** 2,
+        default=100 * 1024,
         type=int,
         help="Size of chunk when updating the progress bar.",
     )
+
     parser.add_argument(
-        "--chunk-size",
-        default=30 * (1024 ** 2),
-        type=int,
-        help="Size of single request in multiple chunk uploading.",
+        "--http-args",
+        default={},
+        type=json.loads,
+        help="HTTP arguments formated in the python dict",
+    )
+
+    parser.add_argument(
+        "--client-sleep-time",
+        default=10,
+        type=float,
+        help="Time to sleep when client has been throttled.",
+    )
+
+    parser.add_argument(
+        "--max-clients", default=10, type=int, help="The number of clients."
     )
 
     parser.add_argument(
@@ -58,25 +71,35 @@ def parse_args():
         help="Max size of single page when listing files.",
     )
 
+    parser.add_argument(
+        "--max-download-workers",
+        default=5,
+        type=int,
+        help="Max workers when downloading the file.",
+    )
+
+    parser.add_argument(
+        "--aria2-polling-interval",
+        default=1,
+        type=int,
+        help="Aria2 polling interval.",
+    )
+
     args, rest = parser.parse_known_args()
 
     if os.path.exists(args.conf):
-        conf_json = json.load(open(args.conf, "r"))
-        config = conf_json.get("configs")
-        transfers = conf_json.get("transfers")
-        bars = conf_json.get("bar")
+        conf = json.load(open(args.conf, "r"))
 
-        if not config:
-            raise Exception("Missing configs")
+        args_dict["CHUNK_SIZE"] = args.chunk_size
+        args_dict["STEP_SIZE"] = args.step_size
+        args_dict["HTTP_ARGS"] = args.http_args
+        args_dict["CLIENT_SLEEP_TIME"] = args.client_sleep_time
 
-        if not transfers:
-            raise Exception("Missing transfers")
-
-        args_dict = vars(args)
-
-        for k in config.keys():
-            config[k].update(args_dict)
-
-        return args, rest[:2], config, transfers, bars
+        args_dict["MAX_CLIENTS"] = args.max_clients
+        args_dict["MAX_PAGE_SIZE"] = args.max_page_size
+        args_dict["MAX_DOWNLOAD_WORKERS"] = args.max_download_workers
+        args_dict["ARIA2_POLLING_INTERVAL"] = args.aria2_polling_interval
+        
+        return args, rest, conf
     else:
-        raise Exception("Config file does not exist.")
+        raise FileNotFoundError("Config file does not exist.")

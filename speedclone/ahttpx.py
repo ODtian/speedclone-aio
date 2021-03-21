@@ -1,21 +1,55 @@
 from httpx import AsyncClient
 
+sock_transport = None
+
+try:
+    from httpx_socks import AsyncProxyTransport
+except ImportError:
+    import logging
+
+    logging.warning(
+        "httpx-socks hasn't installed yet, it might cause some problems when using socks proxies."
+    )
+else:
+    socks_transport = AsyncProxyTransport
+
+
+def get_socks_proxies(proxies):
+    if isinstance(proxies, str) and proxies.startswith("socks"):
+        return proxies
+
+    elif isinstance(proxies, dict):
+        socks_proxies = [v for v in proxies.values() if v.startswith("socks")]
+
+        if socks_proxies:
+            return socks_proxies[0]
+
+
+def create_client(cert=None, verify=True, timeout=None, trust_env=True, proxies=None):
+    transport = None
+    socks_proxies = get_socks_proxies(proxies)
+    if socks_proxies:
+        transport = socks_transport.from_url(socks_proxies)
+        proxies = None
+
+    return AsyncClient(
+        cert=cert,
+        verify=verify,
+        timeout=timeout,
+        trust_env=trust_env,
+        proxies=proxies,
+        transport=transport,
+    )
+
 
 class Client:
     def __init__(self):
         self._client = None
         self.current_client_args = {}
 
-    def _create_client(
-        self, cert=None, verify=True, timeout=None, trust_env=True, proxies=None
-    ):
-        return AsyncClient(
-            cert=cert,
-            verify=verify,
-            timeout=timeout,
-            trust_env=trust_env,
-            proxies=proxies,
-        )
+    async def close(self):
+        if self._client is not None:
+            await self._client.aclose()
 
     async def request(
         self,
@@ -35,9 +69,7 @@ class Client:
         cert=None,
         trust_env=True,
         proxies=None,
-        stream=False
     ):
-
         client_args = {
             "cert": cert,
             "verify": verify,
@@ -49,68 +81,28 @@ class Client:
         if client_args != self.current_client_args:
 
             if self._client:
-                await self._client.__aexit__()
+                await self._client.aclose()
 
             self.current_client_args = client_args
-            self._client = self._create_client(**self.current_client_args)
+            self._client = create_client(**self.current_client_args)
 
-        return await getattr(self._client, "stream" if stream else "request")(
-            method=method,
-            url=url,
-            data=data,
-            files=files,
-            json=json,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            auth=auth,
-            allow_redirects=allow_redirects,
-        )
+        args = {
+            "method": method,
+            "url": url,
+            "data": data,
+            "files": files,
+            "json": json,
+            "params": params,
+            "headers": headers,
+            "cookies": cookies,
+            "auth": auth,
+            "allow_redirects": allow_redirects,
+        }
+
+        return await self._client.request(**args)
 
 
 client = Client()
-
-# class client:
-#     @classmethod
-#     async def request(
-#         cls,
-#         method: str,
-#         url,
-#         *,
-#         params=None,
-#         data=None,
-#         files=None,
-#         json=None,
-#         headers=None,
-#         cookies=None,
-#         auth=None,
-#         timeout=None,
-#         allow_redirects=True,
-#         verify=True,
-#         cert=None,
-#         trust_env=True,
-#         proxies=None,
-#         stream=False
-#     ):
-#         async with AsyncClient(
-#             cert=cert,
-#             verify=verify,
-#             timeout=timeout,
-#             trust_env=trust_env,
-#             proxies=proxies,
-#         ) as client:
-#             return await getattr(client, "stream" if stream else "request")(
-#                 method=method,
-#                 url=url,
-#                 data=data,
-#                 files=files,
-#                 json=json,
-#                 params=params,
-#                 headers=headers,
-#                 cookies=cookies,
-#                 auth=auth,
-#                 allow_redirects=allow_redirects,
-#             )
 
 
 async def get(
@@ -126,7 +118,6 @@ async def get(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "GET",
@@ -157,7 +148,6 @@ async def options(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "OPTIONS",
@@ -188,7 +178,6 @@ async def head(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "HEAD",
@@ -222,7 +211,6 @@ async def post(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "POST",
@@ -259,7 +247,6 @@ async def put(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "PUT",
@@ -296,7 +283,6 @@ async def patch(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "PATCH",
@@ -330,7 +316,6 @@ async def delete(
     timeout=None,
     trust_env=True,
     proxies=None,
-    stream=False
 ):
     return await client.request(
         "DELETE",

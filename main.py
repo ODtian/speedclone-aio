@@ -1,71 +1,84 @@
 import importlib
 import logging
+
 from speedclone.args import parse_args
-from speedclone.manager import TransferManager
 from speedclone.log import init_logger
+from speedclone.manager import TransferManager, init_uv
 
-TRANSFERS_BASE_IMPORT_PATH = "speedclone.transfers."
-BARS_BASE_IMPORT_PATH = "speedclone.bar."
+BASE_IMPORT_PATH = "speedclone."
 
 
-def handle_rest(s):
-    r = s.split(":/")
-    return r.pop(0), ":/".join(r)
+def update_setting(setting, args):
+    args_dict = vars(args)
+    for k in setting.keys():
+        setting[k].update(args_dict)
+    return setting
+
+
+def seperate_urls(urls):
+    def split(url):
+        sep_url = url.split(":/")
+        return {"name": sep_url.pop(0), "path": ":/".join(sep_url)}
+
+    return list(map(split, urls))
+
+
+def import_cls(mod, cls):
+    return getattr(importlib.import_module(BASE_IMPORT_PATH + mod), cls,)
+
+
+def transfer_single(transfers):
+    def import_trans(transfer):
+        return import_cls(
+            mod=transfer["trans_import"]["mod"],
+            cls=transfer["trans_import"]["cls"][transfer["as"]],
+        ).get_trans(transfer["path"], transfer["config"])
+
+    trans = list(map(import_trans, transfers))
+    return trans
 
 
 def main():
-    args, rest, config, transfers, bars = parse_args()
+    init_logger()
+    init_uv()
 
-    (f_name, f_path), (t_name, t_path) = map(handle_rest, rest)
+    args, rest, conf = parse_args()
 
-    f_conf = config.get(f_name)
-    t_conf = config.get(t_name)
+    setting = conf["setting"]
+    trans_map = conf["transmitter"]
+    bars = conf["bar"]
 
-    if not f_conf or not t_conf:
-        logging.error(
-            "Could not find config named '{}'".format(
-                "', '".join(
-                    filter(
-                        None, [("" if f_conf else f_name), ("" if t_conf else t_name)]
-                    )
-                )
-            )
+    transfer_chain = seperate_urls(rest)
+    for transfer in transfer_chain:
+        try:
+            config = setting[transfer["name"]]
+        except Exception as e:
+            logging.error("Could not find config named '{}'".format(transfer["name"]))
+            raise e
+        else:
+            transfer["config"] = config
+
+        trans_name = config["transmitter"]
+        transfer["trans_import"] = trans_map[trans_name]
+
+    bar_manager = import_cls(**bars[args.bar]).get_bar_manager()
+
+    for i in range(len(transfer_chain) - 1):
+
+        transfers = transfer_chain[i : i + 2]
+
+        transfers[0]["as"] = "source"
+        transfers[1]["as"] = "target"
+        trans = transfer_single(transfers)
+        trans = list(trans)
+        transfer_manager = TransferManager(
+            trans=trans,
+            bar_manager=bar_manager,
+            interval=args.interval,
+            max_workers=args.max_workers,
         )
-
-    f_trans_name = f_conf.get("transfer")
-    t_trans_name = t_conf.get("transfer")
-
-    if args.copy and (f_trans_name != "gd" or t_trans_name != "gd"):
-        logging.error("Copy mode only support Google Drive, please check your config.")
-
-    f_trans = transfers.get(f_trans_name)
-    t_trans = transfers.get(t_trans_name)
-
-    from_transfer = getattr(
-        importlib.import_module(TRANSFERS_BASE_IMPORT_PATH + f_trans.get("mod")),
-        f_trans.get("cls"),
-    ).get_transfer(f_conf, f_path, args)
-
-    to_transfer = getattr(
-        importlib.import_module(TRANSFERS_BASE_IMPORT_PATH + t_trans.get("mod")),
-        t_trans.get("cls"),
-    ).get_transfer(t_conf, t_path, args)
-
-    bar = bars.get(args.bar)
-    bar_manager = getattr(
-        importlib.import_module(BARS_BASE_IMPORT_PATH + bar.get("mod")), bar.get("cls"),
-    ).get_bar_manager()
-
-    transfer_manager = TransferManager(
-        download_manager=from_transfer,
-        upload_manager=to_transfer,
-        bar_manager=bar_manager,
-        sleep_time=args.interval,
-        max_workers=args.workers,
-    )
-    transfer_manager.run()
+        transfer_manager.run()
 
 
 if __name__ == "__main__":
-    init_logger()
     main()

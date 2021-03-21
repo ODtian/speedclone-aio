@@ -1,46 +1,84 @@
+# from threading import Timer
+
+import asyncio
+
 from tqdm.autonotebook import tqdm
+
 from .basebar import BaseBarManager
+
+MIN_WIDTH = 40
 
 
 class CommonBar:
-    max_width = 20
-    slow = 20
-
     def __init__(self):
-        self.step = 1
         self.bar = None
 
-    def init_bar(self, total, desc):
-        self.content = desc.ljust(self.max_width, " ")
-        self.bar = self._create_bar(total)
+        self.stop = False
+
+        self.bytes_counted = 0
+        self.bytes_total = 0
+
+        self._content = ""
+        self.now_content = ""
+
+    # async def timer(self):
+    #     while not self.stop:
+    #         await asyncio.sleep(0.5)
+    #         self.scroll_text()
+
+    def set_info(self, file_size, total_path):
+        # self.content = total_path.ljust(MIN_WIDTH, " ")
+        self.bytes_total = file_size
+        self._content = total_path
+        self.now_content = " " * MIN_WIDTH + self._content
+
+        self.bar = self.create_bar()
 
     def update(self, n):
-        self._scroll_text()
-        self.bar.set_description_str(self.content[: self.max_width])
+        self.bytes_counted += n
         self.bar.update(n)
 
-    def close(self):
-        if self.bar:
+        if self.is_finished():
+            self.stop = True
+            self.bar.set_description_str(self._content)
             self.bar.close()
 
-    def _scroll_text(self):
-        if self.step % self.slow == 0:
-            self.content.append(self.content.pop(0))
-        self.step += 1
+    def is_finished(self):
+        return self.bytes_counted == self.bytes_total
 
-    def _create_bar(self, total):
+    def create_bar(self):
         bar_format = "| {desc} | {percentage: >6.2f}% |{bar:20}| {n_fmt:>6} / {total_fmt:<6} [{rate_fmt:<8} {elapsed}>{remaining}]"
         bar = tqdm(
-            total=total,
+            total=self.bytes_total,
             bar_format=bar_format,
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
         )
-        bar.set_description_str(self.content[: self.max_width])
         return bar
+
+    def scroll_text(self):
+        self.now_content = self.now_content[1:] + self.now_content[0]
+        # self.bar.set_description_str((self.content[:MIN_WIDTH]).ljust(MIN_WIDTH, " "))
+        self.bar.set_description_str(self.now_content[:MIN_WIDTH])
 
 
 class CommonBarManager(BaseBarManager):
-    def get_bar(self, task):
-        return CommonBar()
+    def __init__(self):
+        super(CommonBarManager, self).__init__()
+        self._bars = []
+
+        loop = asyncio.get_event_loop()
+        asyncio.run_coroutine_threadsafe(self.timer(), loop)
+
+    async def timer(self):
+        while True:
+            for bar in self._bars:
+                if not bar.stop:
+                    bar.scroll_text()
+            await asyncio.sleep(0.5)
+
+    def get_bar(self):
+        bar = CommonBar()
+        self._bars.append(bar)
+        return bar

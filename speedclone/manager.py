@@ -1,58 +1,51 @@
 import asyncio
-import time
 import logging
-
-# from queue import Empty, Queue
+import time
 from threading import Thread
 
-from .error import TaskExistError, TaskFailError
-from .utils import aiter_with_end
+from .ahttpx import client
+from .error import TaskError, TaskExistError
 
-try:
-    import uvloop
-except ImportError:
-    logging.warning(
-        "Uvloop is not installed, which can bring performance improvement. Install by 'pip install uvloop'."
-    )
-    # console_write(
-    #     "sleep",
-    #     "[info] Module uvloop is not installed, use default loop instead. Using uvloop can bring significant performance improvement, install it by 'pip install uvloop'.",
-    # )
-else:
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+on_close_callbacks = [client.close()]
+
+
+def init_uv():
+    try:
+        import uvloop
+    except ImportError:
+        logging.warning(
+            "Uvloop is not installed, which can bring performance improvement. Install by 'pip install uvloop'."
+        )
+    else:
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 class TransferManager:
-    def __init__(
-        self, download_manager, upload_manager, bar_manager, sleep_time, max_workers
-    ):
-        self.download_manager = download_manager
-        self.upload_manager = upload_manager
+    def __init__(self, trans, bar_manager, interval, max_workers):
+        self.source_trans, self.target_trans = trans
         self.bar_manager = bar_manager
 
-        self.sleep_time = sleep_time
+        self.interval = interval
         self.max_workers = max_workers
 
         self.sem = asyncio.Semaphore(self.max_workers)
         self.loop = asyncio.get_event_loop()
 
-        self.pusher_finished = False
+        self.task_pusher_finished = False
         self.task_queue = asyncio.Queue()
         self.now_task = 0
+        self._finished = False
 
-        # TransferManager.me = self
+    async def handle_task_fail(self, e):
+        if isinstance(e, TaskExistError):
+            e.task.bar.update(e.task.bar.bytes_total)
+        else:
+            e.task.bar.update(-e.task.bar.bytes_counted)
 
-    # async def handle_sleep(self, e):
-    #     await self.put_task(e.task)
-    #     time.sleep(e.sleep_time)
-    #     self.bar_manager.sleep(e)
+        logging.log(e.level, e.msg, exc_info=e.traceback)
 
-    async def handle_error(self, e, task=None):
-        await self.put_task(task or e.task)
-        self.bar_manager.error(e)
-
-    def handle_exists(self, e):
-        self.bar_manager.exists(e)
+        if not e.task_exit:
+            await self.put_task(e.task)
 
     async def put_task(self, task):
         self.now_task += 1
@@ -61,48 +54,36 @@ class TransferManager:
     def task_done(self):
         self.now_task -= 1
 
-    def finished(self):
-        return self.now_task == 0 and self.pusher_finished
+    def all_tasks_finished(self):
+        return (self.now_task == 0 and self.task_pusher_finished) or self._finished
 
     async def task_pusher(self):
         try:
-            async for task, is_end in aiter_with_end(
-                self.download_manager.iter_tasks()
-            ):
-                if is_end:
-                    task.end = True
+            async for file in self.source_trans.iter_file():
+                task = await self.target_trans.get_task(file)
                 await self.put_task(task)
-            self.pusher_finished = True
-        except Exception:
-            logging.error("", exc_info=True)
+        except Exception as e:
+            self._finished = True
+            raise e
+        finally:
+            self.task_pusher_finished = True
 
-    async def get_worker(self):
+    async def get_task(self):
         try:
             task = self.task_queue.get_nowait()
         except asyncio.QueueEmpty:
             return
         else:
-            _worker = await self.upload_manager.get_worker(task)
-            bar = self.bar_manager.get_bar(task)
+            bar = self.bar_manager.get_bar()
+            task.set_bar(bar)
+            return task
 
-            async def worker():
-                return await _worker(bar)
-
-            worker.task = task
-            return worker
-
-    async def excutor(self, worker):
+    async def worker(self, task):
         async with self.sem:
             try:
-                await worker()
-            # except TaskSleepError as e:
-            #     await self.handle_sleep(e)
-            except TaskExistError as e:
-                self.handle_exists(e)
-            except TaskFailError as e:
-                await self.handle_fail(e)
-            except Exception as e:
-                await self.handle_error(e, worker.task)
+                await task.run()
+            except TaskError as e:
+                await self.handle_task_fail(e)
             finally:
                 self.task_done()
 
@@ -118,14 +99,16 @@ class TransferManager:
 
     def run_loop(self):
         while True:
-            time.sleep(self.sleep_time)
-            if self.finished():
+            time.sleep(self.interval)
+            if self.all_tasks_finished():
                 break
             else:
-                worker = self.add_to_loop(self.get_worker()).result()
-                if not worker:
+                task = self.add_to_loop(self.get_task()).result()
+                if not task:
                     continue
-                self.add_to_loop(self.excutor(worker))
+
+                worker = self.add_to_loop(self.worker(task))
+                worker.add_done_callback(lambda w: w.result())
 
     def stop_loop(self):
         self.loop.call_soon_threadsafe(self.loop.stop)
@@ -133,7 +116,10 @@ class TransferManager:
     def run(self):
         try:
             self.start_loop()
-            self.add_to_loop(self.task_pusher())
+            pusher = self.add_to_loop(self.task_pusher())
+            pusher.add_done_callback(lambda p: p.result())
             self.run_loop()
         finally:
+            for callback in on_close_callbacks:
+                self.add_to_loop(callback)
             self.stop_loop()
