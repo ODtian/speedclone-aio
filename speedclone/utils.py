@@ -79,6 +79,10 @@ def parse_params(params):
     return parsed_params
 
 
+def parse_cookies(cookies):
+    return "; ".join([f"{k}={v}" for k, v in cookies.items()])
+
+
 def parse_ranges(ranges):
     return "bytes=" + ", ".join([f"{start}-{end}" for start, end in ranges])
 

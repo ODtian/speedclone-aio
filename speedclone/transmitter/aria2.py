@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import os
 
 import aioaria2
 
@@ -39,10 +41,11 @@ class Aria2Task:
         downloaded_length = 0
         try:
             url, headers = await self.file.get_download_info()
+            base_path, _ = os.path.split(self.total_path)
             gid = await self.client.addUri(
                 [url],
                 options={
-                    "dir": self.total_path,
+                    "dir": base_path,
                     "header": parse_headers(headers).split("\n"),
                 },
             )
@@ -51,15 +54,19 @@ class Aria2Task:
                 status = await self.client.tellStatus(
                     gid, keys=["status", "completedLength", "errorCode", "errorMessage"]
                 )
+
                 if status["status"] == "active":
-                    self.bar.update(status["completedLength"] - downloaded_length)
-                    downloaded_length = status["completedLength"]
+                    completed_length = int(status["completedLength"])
+                    self.bar.update(completed_length - downloaded_length)
+                    downloaded_length = completed_length
+
                 elif status["status"] == "error":
                     raise TaskFailError(
                         path=self.total_path,
                         task=self,
                         error_msg=f"aria2 error code={status['errorCode']} {status['errorMessage']}",
                     )
+
                 elif status["status"] == "removed":
                     raise TaskFailError(
                         path=self.total_path,
@@ -70,6 +77,7 @@ class Aria2Task:
                     )
 
                 elif status["status"] == "complete":
+                    self.bar.update(self.bar.bytes_total - self.bar.bytes_counted)
                     break
 
                 await asyncio.sleep(ARIA2_POLLING_INTERVAL)
@@ -90,7 +98,7 @@ class Aria2Task:
 class Aria2Tasks:
     def __init__(self, target_path, url, token):
         self.target_path = target_path
-        self.client = aioaria2.Aria2HttpClient(url=url, mode="batch", token="admin")
+        self.client = aioaria2.Aria2HttpClient(url, token=token)
         on_close_callbacks.append(self.client.close())
 
     @classmethod
