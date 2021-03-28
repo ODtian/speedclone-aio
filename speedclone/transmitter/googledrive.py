@@ -466,10 +466,10 @@ class GoogleDriveBase:
                     token_backend = GoogleServiceAccountTokenBackend(
                         credit_path=credit_path
                     )
-                client = GoogleDriveClient(
-                    token_backend=token_backend, drive_id=drive_id
-                )
-                clients.append(client)
+                    client = GoogleDriveClient(
+                        token_backend=token_backend, drive_id=drive_id
+                    )
+                    clients.append(client)
             else:
 
                 credit = config["credit"]
