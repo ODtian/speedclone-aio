@@ -357,7 +357,7 @@ class GoogleDriveTask:
 
     def _handle_status_error(self, e):
         if e.status_code == 429:
-            client_sleep_time = e.response.headers.get("Retry-After")
+            client_sleep_time = int(e.response.headers.get("Retry-After"))
             self.client.sleep(client_sleep_time)
         elif e.status_code // 100 == 4 and "LimitExceeded" in e.response.text:
             self.client.sleep(CLIENT_SLEEP_TIME)
