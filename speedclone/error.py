@@ -14,7 +14,7 @@ class HttpStatusError(Exception):
     def _build_raw_response(self):
         return "\n\n".join(
             (
-                f"HTTP {self.response.request.method} {self.response.status_code}\n"
+                f"{self.response.request.method} {self.response.status_code}\n"
                 + parse_headers(self.response.headers, join=": "),
                 self.response.text,
             )

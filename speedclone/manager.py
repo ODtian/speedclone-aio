@@ -3,10 +3,10 @@ import logging
 import time
 from threading import Thread
 
-from .ahttpx import client
+# from .ahttpx import client
 from .error import TaskError, TaskExistError
 
-on_close_callbacks = [client.close()]
+on_close_callbacks = []
 
 
 def init_uv():

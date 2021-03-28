@@ -16,8 +16,6 @@ from .. import ahttpx
 from ..args import args_dict
 from ..error import HttpStatusError, TaskFailError, TaskNotDoneError
 from ..utils import (
-    MultiWorkersRequest,
-    aenumerate,
     aiter_data,
     format_path,
     get_gmtdatetime,
@@ -26,6 +24,8 @@ from ..utils import (
     utc_to_datetime,
     raise_for_status,
 )
+
+from ..filereader import HttpFileReader
 
 # UPLOAD_INFO_URL = "https://uplb.115.com/3.0/getuploadinfo.php"
 USER_INFO_URL = "https://proapi.115.com/app/uploadinfo"
@@ -39,6 +39,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, li
 
 CHUNK_SIZE = args_dict["CHUNK_SIZE"]
 STEP_SIZE = args_dict["STEP_SIZE"]
+DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
 MAX_PAGE_SIZE = args_dict["MAX_PAGE_SIZE"]
 
 
@@ -151,6 +152,8 @@ class OSSMultipartUpload:
 
         self.upload_id = None
         self.parts = []
+
+        self.uploaded_bytes = 0
 
     async def init_multipart_upload(self):
         params = self.oss_resources["subresources"] = {"uploads": ""}
@@ -329,9 +332,7 @@ class Cloud115Client:
             return json_resp["cid"]
 
     async def get_download_info(self, pick_code):
-        headers = {
-            **self.headers
-        }
+        headers = {**self.headers}
         params = {"pickcode": pick_code, "_": int(time.time() * 1000)}
         r = await ahttpx.get(DOWNLOAD_URL, headers=headers, params=params)
         raise_for_status(r)
@@ -375,34 +376,13 @@ class Cloud115File:
     def get_size(self):
         return self.size
 
-    async def iter_chunk(self, chunk_size, offset=0):
-        if not self.pick_code:
-            raise ValueError("pikecode is not set.")
-
+    async def get_reader(self, start=0, end=None):
         url, headers = await self.client.get_download_info(self.pick_code)
-
-        mul_req = MultiWorkersRequest(
-            http_kwargs={"url": url, "headers": headers},
+        return HttpFileReader(
+            url,
+            headers=headers,
+            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
             max_workers=2,
-            allow_multiple_ranges=False,
-        )
-
-        async for chunk in mul_req.aiter_chunk(
-            start=offset * chunk_size,
-            end=self.size,
-            chunk_size=chunk_size,
-        ):
-            yield chunk
-
-    async def read(self, length, offset=0):
-        if not self.pick_code:
-            raise ValueError("pikecode is not set.")
-
-        url, headers = await self.client.get_download_info(self.pick_code)
-        mul_req = MultiWorkersRequest(http_kwargs={"url": url, "headers": headers})
-
-        return await mul_req.aread(
-            start=offset, end=min(offset + length, self.size), chunk_size=CHUNK_SIZE
         )
 
 
@@ -413,6 +393,8 @@ class Cloud115Task:
         self.cid_future = cid_future
         self.client = client
 
+        self._block_hash = None
+        self._total_hash = None
         self.bar = None
 
     def set_bar(self, bar):
@@ -428,21 +410,28 @@ class Cloud115Task:
 
         if is_115file and hasattr(self.file, "block_hash"):
             block_hash = self.file.block_hash
+        elif self._block_hash:
+            block_hash = self._block_hash
         else:
-            block_hash = (
-                hashlib.sha1(await self.file.read(length=1024 * 128))
-                .hexdigest()
-                .upper()
-            )
+            async with (await self.file.get_reader(end=1024 * 128)) as reader:
+                block_hash = self._block_hash = (
+                    hashlib.sha1(await reader.read(1024 * 128)).hexdigest().upper()
+                )
 
         if is_115file and hasattr(self.file, "total_hash"):
             total_hash = self.file.total_hash
+        elif self._total_hash:
+            total_hash = self._total_hash
         else:
             total_sha1 = hashlib.sha1()
-            async for c in self.file.iter_chunk(chunk_size=CHUNK_SIZE):
-                total_sha1.update(c)
+            async with (await self.file.get_reader()) as reader:
+                while True:
+                    data = await reader.read(CHUNK_SIZE)
+                    if not data:
+                        break
+                    total_sha1.update(data)
 
-            total_hash = total_sha1.hexdigest().upper()
+            total_hash = self._total_hash = total_sha1.hexdigest().upper()
 
         return block_hash, total_hash
 
@@ -473,15 +462,11 @@ class Cloud115Task:
                     bucket_name, object_name, is_simple=True
                 )
 
-                async def _aiter_all_data():
-                    async for chunk in self.file.iter_chunk(chunk_size=CHUNK_SIZE):
-                        async for step in aiter_data(chunk, STEP_SIZE, self.bar):
-                            yield step
-
-                data = _aiter_all_data()
-                await oss_upload.upload(
-                    data=data, callback=callback, callback_var=callback_var
-                )
+                async with (await self.file.get_reader()) as reader:
+                    data = aiter_data(reader, self.bar.update, STEP_SIZE)
+                    await oss_upload.upload(
+                        data=data, callback=callback, callback_var=callback_var
+                    )
 
             else:
                 oss_upload = self.client.create_upload(
@@ -490,17 +475,23 @@ class Cloud115Task:
 
                 await oss_upload.init_multipart_upload()
 
-                start = len(oss_upload.parts)
-                async for i, chunk in aenumerate(
-                    self.file.iter_chunk(chunk_size=CHUNK_SIZE, offset=start),
-                    start + 1,
-                ):
-                    await oss_upload.upload_part(
-                        part_number=i, data=aiter_data(chunk, STEP_SIZE, self.bar)
-                    )
-                await oss_upload.complete_upload(
-                    callback=callback, callback_var=callback_var
-                )
+                async with (
+                    await self.file.get_reader(start=oss_upload.uploaded_bytes)
+                ) as reader:
+                    for i, start in enumerate(
+                        range(
+                            oss_upload.uploaded_bytes, self.file.get_size(), CHUNK_SIZE
+                        ),
+                        len(oss_upload.parts) + 1,
+                    ):
+                        length = min(start + CHUNK_SIZE, self.file.get_size()) - start
+                        await oss_upload.upload_part(
+                            part_number=i,
+                            data=aiter_data(
+                                reader, self.bar.update, STEP_SIZE, length=length
+                            ),
+                        )
+                        oss_upload.uploaded_bytes += length
 
         except HttpStatusError as e:
             raise TaskFailError(
@@ -566,8 +557,6 @@ class Cloud115Files(Cloud115Base):
         raise ValueError("No such file.")
 
     async def _list_files(self, cid, offset=0):
-        import json
-
         data = await self.client.list_files(cid, offset=offset)
 
         base_path = format_path(*[p["name"] for p in data["path"][self.nodes_len :]])

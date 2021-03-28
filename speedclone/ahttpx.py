@@ -1,45 +1,50 @@
 from httpx import AsyncClient
+from .manager import on_close_callbacks
+from .args import args_dict
 
-sock_transport = None
+PROXY = args_dict["PROXY"]
+# sock_transport = None
 
-try:
-    from httpx_socks import AsyncProxyTransport
-except ImportError:
-    import logging
+# try:
+#     from httpx_socks import AsyncProxyTransport
+# except ImportError:
+#     import logging
 
-    logging.warning(
-        "httpx-socks hasn't installed yet, it might cause some problems when using socks proxies."
-    )
-else:
-    socks_transport = AsyncProxyTransport
-
-
-def get_socks_proxies(proxies):
-    if isinstance(proxies, str) and proxies.startswith("socks"):
-        return proxies
-
-    elif isinstance(proxies, dict):
-        socks_proxies = [v for v in proxies.values() if v.startswith("socks")]
-
-        if socks_proxies:
-            return socks_proxies[0]
+#     logging.warning(
+#         "httpx-socks hasn't installed yet, it might cause some problems when using socks proxies."
+#     )
+# else:
+#     socks_transport = AsyncProxyTransport
 
 
-def create_client(cert=None, verify=True, timeout=None, trust_env=True, proxies=None):
-    transport = None
-    socks_proxies = get_socks_proxies(proxies)
-    if socks_proxies:
-        transport = socks_transport.from_url(socks_proxies)
-        proxies = None
+# def get_socks_proxies(proxies):
+#     if isinstance(proxies, str) and proxies.startswith("socks"):
+#         return proxies
 
-    return AsyncClient(
-        cert=cert,
-        verify=verify,
-        timeout=timeout,
-        trust_env=trust_env,
-        proxies=proxies,
-        transport=transport,
-    )
+#     elif isinstance(proxies, dict):
+#         socks_proxies = [v for v in proxies.values() if v.startswith("socks")]
+
+#         if socks_proxies:
+#             return socks_proxies[0]
+
+
+# def create_
+
+# def create_client(cert=None, verify=True, timeout=None, trust_env=True, proxies=None):
+#     transport = None
+#     socks_proxies = get_socks_proxies(proxies)
+#     if socks_proxies:
+#         transport = socks_transport.from_url(socks_proxies)
+#         proxies = None
+
+#     return AsyncClient(
+#         cert=cert,
+#         verify=verify,
+#         timeout=timeout,
+#         trust_env=trust_env,
+#         proxies=proxies,
+#         transport=transport,
+#     )
 
 
 class Client:
@@ -70,39 +75,38 @@ class Client:
         trust_env=True,
         proxies=None,
     ):
-        client_args = {
-            "cert": cert,
-            "verify": verify,
-            "timeout": timeout,
-            "trust_env": trust_env,
-            "proxies": proxies,
-        }
+        client_args = (cert, verify, timeout, trust_env, proxies)
 
         if client_args != self.current_client_args:
+            self.current_client_args = client_args
 
             if self._client:
                 await self._client.aclose()
 
-            self.current_client_args = client_args
-            self._client = create_client(**self.current_client_args)
+            self._client = AsyncClient(
+                cert=cert,
+                verify=verify,
+                timeout=timeout,
+                trust_env=trust_env,
+                proxies=proxies or PROXY,
+            )
 
-        args = {
-            "method": method,
-            "url": url,
-            "data": data,
-            "files": files,
-            "json": json,
-            "params": params,
-            "headers": headers,
-            "cookies": cookies,
-            "auth": auth,
-            "allow_redirects": allow_redirects,
-        }
-
-        return await self._client.request(**args)
+        return await self._client.request(
+            method=method,
+            url=url,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            allow_redirects=allow_redirects,
+        )
 
 
 client = Client()
+on_close_callbacks.append(client.close())
 
 
 async def get(

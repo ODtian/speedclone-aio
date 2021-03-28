@@ -1,4 +1,3 @@
-import logging
 import os
 from urllib import parse
 
@@ -6,15 +5,15 @@ import httpx
 
 from .. import ahttpx
 from ..args import args_dict
-from ..utils import MultiWorkersRequest, format_path, parse_cookies, raise_for_status
+from ..filereader import HttpFileReader
+from ..utils import format_path, parse_cookies, raise_for_status
 
 CHUNK_SIZE = args_dict["CHUNK_SIZE"]
-
+DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
 MAX_DOWNLOAD_WORKERS = args_dict["MAX_DOWNLOAD_WORKERS"]
 
 DOWNLOAD_URL = "https://{tenant_name}/personal/{account_name}/_layouts/15/download.aspx?UniqueId={unique_id}"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36 Edg/87.0.664.41"
-
 STREAM_LIST_DATA = {
     "parameters": {
         "__metadata": {"type": "SP.RenderListDataParameters"},
@@ -30,10 +29,10 @@ class OnedriveShareFile:
         self.download_url = download_url
         self.relative_path = relative_path
         self.size = size
-        self.cookies = cookies
+        self.cookies = parse_cookies(cookies)
 
     async def get_download_info(self):
-        return self.download_url, {"Cookie": parse_cookies(self.cookies)}
+        return self.download_url, {"Cookie": self.cookies}
 
     def get_relative_path(self):
         return self.relative_path
@@ -41,31 +40,12 @@ class OnedriveShareFile:
     def get_size(self):
         return self.size
 
-    async def iter_chunk(self, chunk_size, offset=0):
-        url, params, headers = await self.get_download_info()
-        mul_req = MultiWorkersRequest(
-            http_kwargs={"url": url, "params": params, "headers": headers},
+    async def get_reader(self, start=0, end=None):
+        return HttpFileReader(
+            self.download_url,
+            headers={"Cookie": self.cookies},
+            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
             max_workers=MAX_DOWNLOAD_WORKERS,
-            allow_multiple_ranges=False,
-        )
-
-        async for chunk in mul_req.aiter_chunk(
-            start=offset * chunk_size,
-            end=self.size,
-            chunk_size=chunk_size,
-        ):
-            yield chunk
-
-    async def read(self, length, offset=0):
-        url, params, headers = await self.get_download_info()
-
-        mul_req = MultiWorkersRequest(
-            http_kwargs={"url": url, "params": params, "headers": headers},
-            max_workers=MAX_DOWNLOAD_WORKERS,
-            allow_multiple_ranges=True,
-        )
-        return await mul_req.aread(
-            start=offset, end=min(offset + length, self.size), chunk_size=CHUNK_SIZE
         )
 
 
@@ -132,7 +112,6 @@ class OnedriveShareFiles:
             path = format_path(*row["FileRef"].split("/")[4:])
 
             if is_folder:
-                # print("/".join(file_ref.split("/")[4:]))
                 folders.append(path)
             else:
                 unique_id = row["UniqueId"].lstrip("{").rstrip("}")

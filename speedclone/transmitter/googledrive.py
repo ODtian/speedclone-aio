@@ -20,8 +20,6 @@ from ..error import (
     TaskNotDoneError,
 )
 from ..utils import (
-    MultiWorkersRequest,
-    aenumerate,
     aiter_data,
     format_path,
     iter_path,
@@ -29,9 +27,11 @@ from ..utils import (
     raise_for_status,
 )
 
+from ..filereader import HttpFileReader
+
 CHUNK_SIZE = args_dict["CHUNK_SIZE"]
 STEP_SIZE = args_dict["STEP_SIZE"]
-HTTP_ARGS = args_dict["HTTP_ARGS"]
+DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
 
 CLIENT_SLEEP_TIME = args_dict["CLIENT_SLEEP_TIME"]
 
@@ -79,7 +79,7 @@ class GoogleTokenBackend:
         data = {"refresh_token": refresh_token, "grant_type": "refresh_token"}
         data.update(self.credit)
 
-        r = await ahttpx.post(TOKEN_URL, data=data, **HTTP_ARGS)
+        r = await ahttpx.post(TOKEN_URL, data=data)
         raise_for_status(r)
 
         self.token.update(r.json())
@@ -124,7 +124,7 @@ class GoogleServiceAccountTokenBackend(GoogleTokenBackend):
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
             "assertion": auth_jwt,
         }
-        r = await ahttpx.post(TOKEN_URL, data=data, **HTTP_ARGS)
+        r = await ahttpx.post(TOKEN_URL, data=data)
         raise_for_status(r)
 
         self.token.update(r.json())
@@ -145,7 +145,6 @@ class GoogleDriveClient:
             "Authorization": token,
             "Content-Type": content_type,
         }
-        headers.update(HTTP_ARGS.get("headers", {}))
         return headers
 
     def _get_params(self, params={}):
@@ -179,9 +178,7 @@ class GoogleDriveClient:
         params = {"fields": ", ".join(fields), "supportsAllDrives": "true"}
         headers = await self._get_headers()
 
-        r = await ahttpx.get(
-            DRIVE_URL + "/" + file_id, headers=headers, params=params, **HTTP_ARGS
-        )
+        r = await ahttpx.get(DRIVE_URL + "/" + file_id, headers=headers, params=params)
         raise_for_status(r)
         return r.json()
 
@@ -191,7 +188,7 @@ class GoogleDriveClient:
         headers = await self._get_headers()
 
         r = await ahttpx.get(
-            DRIVE_URL, headers=headers, params=self._get_params(params), **HTTP_ARGS
+            DRIVE_URL, headers=headers, params=self._get_params(params)
         )
         raise_for_status(r)
         return r.json()
@@ -249,9 +246,7 @@ class GoogleDriveClient:
 
         headers = await self._get_headers()
 
-        r = await ahttpx.post(
-            DRIVE_URL, headers=headers, params=params, json=data, **HTTP_ARGS
-        )
+        r = await ahttpx.post(DRIVE_URL, headers=headers, params=params, json=data)
         raise_for_status(r)
         return r.json()
 
@@ -275,7 +270,6 @@ class GoogleDriveClient:
             headers=headers,
             json=data,
             params=params,
-            **HTTP_ARGS,
         )
         raise_for_status(r)
         return r.json()
@@ -297,7 +291,7 @@ class GoogleDriveClient:
         data = {"name": name, "parents": [parent_id]}
 
         r = await ahttpx.post(
-            DRIVE_UPLOAD_URL, headers=headers, json=data, params=params, **HTTP_ARGS
+            DRIVE_UPLOAD_URL, headers=headers, json=data, params=params
         )
         raise_for_status(r)
         return r.headers["Location"]
@@ -329,31 +323,14 @@ class GoogleDriveFile:
     def get_size(self):
         return self.size
 
-    async def iter_chunk(self, chunk_size, offset=0):
+    async def get_reader(self, start=0, end=None):
         url, params, headers = await self.client.get_download_info(self.file_id)
-        mul_req = MultiWorkersRequest(
-            http_kwargs={"url": url, "params": params, "headers": headers, **HTTP_ARGS},
+        return HttpFileReader(
+            url,
+            params=params,
+            headers=headers,
+            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
             max_workers=MAX_DOWNLOAD_WORKERS,
-            allow_multiple_ranges=False,
-        )
-
-        async for chunk in mul_req.aiter_chunk(
-            start=offset * chunk_size,
-            end=self.size,
-            chunk_size=chunk_size,
-        ):
-            yield chunk
-
-    async def read(self, length, offset=0):
-        url, params, headers = await self.client.get_download_info(self.file_id)
-
-        mul_req = MultiWorkersRequest(
-            http_kwargs={"url": url, "params": params, "headers": headers},
-            max_workers=MAX_DOWNLOAD_WORKERS,
-            allow_multiple_ranges=True,
-        )
-        return await mul_req.aread(
-            start=offset, end=min(offset + length, self.size), chunk_size=CHUNK_SIZE
         )
 
 
@@ -368,9 +345,7 @@ class GoogleDriveTask:
         self.bar = None
 
         self._upload_url = None
-        self._uploaded_count = 0
-
-        self._file_size = self.file.get_size()
+        self._uploaded_bytes = 0
 
     def set_bar(self, bar):
         if self.bar is None:
@@ -391,18 +366,18 @@ class GoogleDriveTask:
             path=self.total_path, task=self, error_msg=str(e), traceback=False
         )
 
-    async def _upload_single_chunk(self, index, chunk):
-        chunk_length = len(chunk)
-        start = index * CHUNK_SIZE
-        end = start + chunk_length - 1
+    async def _upload_single_chunk(self, reader, start):
+        end = min(start + CHUNK_SIZE, self.file.get_size())
+        length = end - start
 
         headers = {
-            "Content-Range": f"bytes {start}-{end}/{self._file_size}",
-            "Content-Length": str(chunk_length),
+            "Content-Range": f"bytes {start}-{end}/{self.file.get_size()}",
+            "Content-Length": str(length),
         }
-        data = aiter_data(chunk, STEP_SIZE, self.bar)
 
-        r = await ahttpx.put(self._upload_url, data=data, headers=headers, **HTTP_ARGS)
+        data = aiter_data(reader, self.bar.update, STEP_SIZE, length=length)
+
+        r = await ahttpx.put(self._upload_url, data=data, headers=headers)
         raise_for_status(r)
 
         if r.status_code == 308:
@@ -418,37 +393,40 @@ class GoogleDriveTask:
             raise TaskFailError(
                 path=self.total_path, task=self, error_msg="Upload was not successful."
             )
+        else:
+            self._uploaded_bytes += length
 
     async def run(self):
         try:
             folder_id = await self.folder_id_future
 
             if isinstance(self.file, GoogleDriveFile):
-                copy_resp = await self.client.copy_file_by_name(
+                copy_r = await self.client.copy_file_by_name(
                     self.file.file_id, folder_id, self.name
                 )
 
-                if copy_resp is True:
+                if copy_r is True:
                     raise TaskExistError(path=self.total_path, task=self)
 
-                if "id" in copy_resp:
+                if "id" in copy_r:
                     self.bar.update(self.file.get_size())
             else:
                 if self._upload_url is None:
-                    upload_url_resp = await self.client.get_upload_url(
+                    upload_url_r = await self.client.get_upload_url(
                         folder_id, self.name
                     )
-                    if upload_url_resp is True:
+                    if upload_url_r is True:
                         raise TaskExistError(path=self.total_path, task=self)
 
-                    self._upload_url = upload_url_resp
+                    self._upload_url = upload_url_r
 
-                async for i, chunk in aenumerate(
-                    self.file.iter_chunk(
-                        chunk_size=CHUNK_SIZE, offset=self._uploaded_count
-                    )
-                ):
-                    await self._upload_single_chunk(i, chunk)
+                async with (
+                    await self.file.get_reader(start=self._uploaded_bytes)
+                ) as reader:
+                    for start in range(
+                        self._uploaded_bytes, self.file.get_size(), CHUNK_SIZE
+                    ):
+                        await self._upload_single_chunk(reader, start)
 
         except TaskError as e:
             raise e

@@ -5,6 +5,7 @@ import aiofiles
 from ..args import args_dict
 from ..error import TaskError, TaskExistError, TaskFailError, TaskNotDoneError
 from ..utils import aiter_data, format_path, iter_path
+from ..filereader import LocalFileReader
 
 CHUNK_SIZE = args_dict["CHUNK_SIZE"]
 STEP_SIZE = args_dict["STEP_SIZE"]
@@ -22,20 +23,23 @@ class LocalFile:
     def get_size(self):
         return self.size
 
-    async def iter_chunk(self, chunk_size, offset=0):
-        async with aiofiles.open(self.abs_path, "rb") as f:
-            f.seek(offset * chunk_size)
-            while True:
-                chunk = await f.read(chunk_size)
-                if chunk:
-                    yield chunk
-                else:
-                    return
+    async def get_reader(self, start=0, end=None):
+        return LocalFileReader(self.abs_path, (start, end))
 
-    async def read(self, length, offset=0):
-        async with aiofiles.open(self.abs_path, "rb") as f:
-            f.seek(offset)
-            return await f.read(length)
+    # async def iter_chunk(self, chunk_size, offset=0):
+    #     async with aiofiles.open(self.abs_path, "rb") as f:
+    #         f.seek(offset * chunk_size)
+    #         while True:
+    #             chunk = await f.read(chunk_size)
+    #             if chunk:
+    #                 yield chunk
+    #             else:
+    #                 return
+
+    # async def read(self, length, offset=0):
+    #     async with aiofiles.open(self.abs_path, "rb") as f:
+    #         f.seek(offset)
+    #         return await f.read(length)
 
 
 class LocalFileTask:
@@ -65,9 +69,9 @@ class LocalFileTask:
             self.make_dir()
 
             async with aiofiles.open(self.total_path, "wb") as f:
-                async for chunk in self.file.iter_chunk(chunk_size=CHUNK_SIZE):
-                    async for step in aiter_data(chunk, STEP_SIZE, self.bar):
-                        await f.write(step)
+                async with (await self.file.get_reader()) as reader:
+                    async for data in aiter_data(reader, self.bar.update, STEP_SIZE):
+                        await f.write(data)
 
         except TaskError as e:
             raise e
