@@ -371,7 +371,7 @@ class GoogleDriveTask:
         length = end - start
 
         headers = {
-            "Content-Range": f"bytes {start}-{end}/{self.file.get_size()}",
+            "Content-Range": f"bytes {start}-{end - 1}/{self.file.get_size()}",
             "Content-Length": str(length),
         }
 
