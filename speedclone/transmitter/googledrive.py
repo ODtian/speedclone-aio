@@ -382,7 +382,7 @@ class GoogleDriveTask:
 
         if r.status_code == 308:
             header_range = r.headers.get("Range")
-            if header_range is None or header_range.lstrip("bytes=0-") != str(end):
+            if header_range is None or header_range.lstrip("bytes=0-") != str(end - 1):
                 raise TaskFailError(
                     path=self.total_path,
                     task=self,
