@@ -3,44 +3,201 @@ import base64
 import datetime
 import hashlib
 import hmac
-
-# import logging
+import json
+import logging
+import math
 import os
 import time
 from urllib import parse
 
 import httpx
 import xmltodict
+from Crypto.Cipher import PKCS1_v1_5 as Cipher_pkcs1_v1_5
+from Crypto.PublicKey import RSA
 
 from .. import ahttpx
 from ..args import args_dict
 from ..error import HttpStatusError, TaskFailError, TaskNotDoneError
+from ..filereader import HttpFileReader
 from ..utils import (
     aiter_data,
     format_path,
     get_gmtdatetime,
     parse_headers,
     parse_params,
-    utc_to_datetime,
     raise_for_status,
+    utc_to_datetime,
 )
-
-from ..filereader import HttpFileReader
 
 # UPLOAD_INFO_URL = "https://uplb.115.com/3.0/getuploadinfo.php"
 USER_INFO_URL = "https://proapi.115.com/app/uploadinfo"
 INIT_UPLOAD_URL = "https://uplb.115.com/3.0/initupload.php"
 LIST_FILE_URL = "https://webapi.115.com/files"
 CREATE_FOLDER_URL = "https://webapi.115.com/files/add"
-DOWNLOAD_URL = "https://webapi.115.com/files/download"
+DOWNLOAD_URL = "https://proapi.115.com/app/chrome/downurl"
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.61 Safari/537.36 115Browser/24.0.0.34"
 
+
+PUBLIC_KEY = (
+    "-----BEGIN RSA PUBLIC KEY-----\n"
+    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3rWmeYnRClwLBB0Rq0dlm8Mr\n"
+    "PmWpL5I23SzCFAoNpJX6Dn74dfb6y02YH15eO6XmeBHdc7ekEFJUIi+swganTokR\n"
+    "IVRRr/z16/3oh7ya22dcAqg191y+d6YDr4IGg/Q5587UKJMj35yQVXaeFXmLlFPo\n"
+    "kFiz4uPxhrB7BGqZbQIDAQAB\n"
+    "-----END RSA PUBLIC KEY-----"
+)
+PRIVATE_KEY = (
+    "-----BEGIN RSA PRIVATE KEY-----\n"
+    "MIICXAIBAAKBgQCMgUJLwWb0kYdW6feyLvqgNHmwgeYYlocst8UckQ1+waTOKHFC\n"
+    "TVyRSb1eCKJZWaGa08mB5lEu/asruNo/HjFcKUvRF6n7nYzo5jO0li4IfGKdxso6\n"
+    "FJIUtAke8rA2PLOubH7nAjd/BV7TzZP2w0IlanZVS76n8gNDe75l8tonQQIDAQAB\n"
+    "AoGANwTasA2Awl5GT/t4WhbZX2iNClgjgRdYwWMI1aHbVfqADZZ6m0rt55qng63/\n"
+    "3NsjVByAuNQ2kB8XKxzMoZCyJNvnd78YuW3Zowqs6HgDUHk6T5CmRad0fvaVYi6t\n"
+    "viOkxtiPIuh4QrQ7NUhsLRtbH6d9s1KLCRDKhO23pGr9vtECQQDpjKYssF+kq9iy\n"
+    "A9WvXRjbY9+ca27YfarD9WVzWS2rFg8MsCbvCo9ebXcmju44QhCghQFIVXuebQ7Q\n"
+    "pydvqF0lAkEAmgLnib1XonYOxjVJM2jqy5zEGe6vzg8aSwKCYec14iiJKmEYcP4z\n"
+    "DSRms43hnQsp8M2ynjnsYCjyiegg+AZ87QJANuwwmAnSNDOFfjeQpPDLy6wtBeft\n"
+    "5VOIORUYiovKRZWmbGFwhn6BQL+VaafrNaezqUweBRi1PYiAF2l3yLZbUQJAf/nN\n"
+    "4Hz/pzYmzLlWnGugP5WCtnHKkJWoKZBqO2RfOBCq+hY4sxvn3BHVbXqGcXLnZPvo\n"
+    "YuaK7tTXxZSoYLEzeQJBAL8Mt3AkF1Gci5HOug6jT4s4Z+qDDrUXo9BlTwSWP90v\n"
+    "wlHF+mkTJpKd5Wacef0vV+xumqNorvLpIXWKwxNaoHM=\n"
+    "-----END RSA PRIVATE KEY-----"
+)
 
 CHUNK_SIZE = args_dict["CHUNK_SIZE"]
 STEP_SIZE = args_dict["STEP_SIZE"]
 DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
 MAX_PAGE_SIZE = args_dict["MAX_PAGE_SIZE"]
+
+
+class Secret:
+    def __init__(self):
+        self.keyS = b"\x29\x23\x21\x5E"
+        self.keyL = b"\x42\xDA\x13\xBA\x78\x76\x8D\x37\xE8\xEE\x04\x91"
+        self.kts = b"\xF0\xE5\x69\xAE\xBF\xDC\xBF\x5A\x1A\x45\xE8\xBE\x7D\xA6\x73\x88\xDE\x8F\xE7\xC4\x45\xDA\x86\x94\x9B\x69\x92\x0B\x6A\xB8\xF1\x7A\x38\x06\x3C\x95\x26\x6D\x2C\x56\x00\x70\x56\x9C\x36\x38\x62\x76\x2F\x9B\x5F\x0F\xF2\xFE\xFD\x2D\x70\x9C\x86\x44\x8F\x3D\x14\x27\x71\x93\x8A\xE4\x0E\xC1\x48\xAE\xDC\x34\x7F\xCF\xFE\xB2\x7F\xF6\x55\x9A\x46\xC8\xEB\x37\x77\xA4\xE0\x6B\x72\x93\x7E\x51\xCB\xF1\x37\xEF\xAD\x2A\xDE\xEE\xF9\xC9\x39\x6B\x32\xA1\xBA\x35\xB1\xB8\xBE\xDA\x78\x73\xF8\x20\xD5\x27\x04\x5A\x6F\xFD\x5E\x72\x39\xCF\x3B\x9C\x2B\x57\x5C\xF9\x7C\x4B\x7B\xD2\x12\x66\xCC\x77\x09\xA6"
+        self.public_cipher = Cipher_pkcs1_v1_5.new(RSA.importKey(PUBLIC_KEY))
+        self.private_cipher = Cipher_pkcs1_v1_5.new(RSA.importKey(PRIVATE_KEY))
+
+    def getkey(self, length, key):
+        if key is not None:
+            results = []
+
+            i = j = 0
+            ref = length
+            while j < ref if ref >= 0 else j > ref:
+                results.append(
+                    ((key[i] + self.kts[length * i]) & 0xFF)
+                    ^ self.kts[length * (length - 1 - i)]
+                )
+
+                if ref >= 0:
+                    j += 1
+                else:
+                    j -= 1
+
+                i = j
+            return results
+
+        if length == 12:
+            return self.keyL
+
+        return self.keyS
+
+    def xor115Enc(self, src, srclen, key, keylen):
+        mod4 = srclen % 4
+        ret = []
+        if mod4 != 0:
+            i = j = 0
+            ref = mod4
+            while j < ref if ref >= 0 else j > ref:
+                ret.append(src[i] ^ key[i % keylen])
+                if ref >= 0:
+                    j += 1
+                else:
+                    j -= 1
+                i = j
+
+        i = k = ref1 = mod4
+        ref2 = srclen
+        while k < ref2 if ref1 <= ref2 else k > ref2:
+            ret.append(src[i] ^ key[(i - mod4) % keylen])
+
+            if ref1 <= ref2:
+                k += 1
+            else:
+                k -= 1
+            i = k
+        return ret
+
+    def md5(self, data):
+        obj = hashlib.md5()
+        obj.update(data)
+        return obj.hexdigest()
+
+    def asymEncode(self, src, srclen):
+        m = 128 - 11
+        ret = b""
+        i = j = 0
+        ref = math.floor((srclen + m - 1) / m)
+
+        while j < ref if ref >= 0 else j > ref:
+            ret += self.public_cipher.encrypt(src[i * m : min((i + 1) * m, srclen)])
+
+            if ref >= 0:
+                j += 1
+            else:
+                j -= 1
+            i = j
+        return base64.b64encode(ret)
+
+    def asymDecode(self, src, srclen):
+        m = 128
+        ret = b""
+        i = j = 0
+        ref = math.floor((srclen + m - 1) / m)
+        while j < ref if ref >= 0 else j > ref:
+            ret += self.private_cipher.decrypt(
+                src[i * m : min((i + 1) * m, srclen)], sentinel="1"
+            )
+
+            if ref >= 0:
+                j += 1
+            else:
+                j -= 1
+            i = j
+        return ret
+
+    def symEncode(self, src, srclen, key1, key2):
+        k1 = self.getkey(4, key1)
+        k2 = self.getkey(12, key2)
+        ret = self.xor115Enc(src, srclen, k1, 4)
+        ret.reverse()
+        ret = self.xor115Enc(ret, srclen, k2, 12)
+        return ret
+
+    def symDecode(self, src, srclen, key1, key2):
+        k1 = self.getkey(4, key1)
+        k2 = self.getkey(12, key2)
+        ret = self.xor115Enc(src, srclen, k2, 12)
+        ret.reverse()
+        ret = self.xor115Enc(ret, srclen, k1, 4)
+        return ret
+
+    def encode(self, string, timestamp):
+        key = self.md5(f"!@###@#{timestamp}DFDR@#@#".encode()).encode()
+        temp = string.encode()
+        temp = self.symEncode(temp, len(temp), key, None)
+        temp = key[:16] + bytes(temp)
+        return self.asymEncode(temp, len(temp)), key
+
+    def decode(self, string, key):
+        temp = base64.b64decode(string)
+        temp = self.asymDecode(temp, len(temp))
+        return bytes(self.symDecode(temp[16:], len(temp) - 16, key, temp[:16]))
+
+
+secret_115 = Secret()
 
 
 class OSSTokenBackend:
@@ -332,20 +489,22 @@ class Cloud115Client:
             return json_resp["cid"]
 
     async def get_download_info(self, pick_code):
-        headers = {**self.headers}
-        params = {"pickcode": pick_code, "_": int(time.time() * 1000)}
-        r = await ahttpx.get(DOWNLOAD_URL, headers=headers, params=params)
-        raise_for_status(r)
-        print(r.text)
-        download_url = r.json()["file_url"].replace("http", "https")
-        download_headers = {
-            "Origin": "https://115.com",
-            "Referer": "https://115.com/",
-            "User-Agent": USER_AGENT,
-            # "Cookie": r.headers["Set-Cookie"].split(";")[0],
-        }
+        ts = int(time.time())
 
-        return download_url, download_headers
+        headers = {"Cookie": self.headers["Cookie"]}
+        params = {"t": ts}
+
+        encrypt_data, key = secret_115.encode(json.dumps({"pickcode": pick_code}), ts)
+
+        r = await ahttpx.post(
+            DOWNLOAD_URL, headers=headers, params=params, data={"data": encrypt_data}
+        )
+        raise_for_status(r)
+
+        decrypt_data = json.loads(secret_115.decode(r.json()["data"], key))
+        download_url = tuple(decrypt_data.values())[0]["url"]["url"]
+
+        return download_url, {}
 
 
 class Cloud115File:
