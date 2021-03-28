@@ -7,7 +7,6 @@ import random
 import time
 
 import aiofiles
-import aiostream
 import jwt
 
 from .. import ahttpx
@@ -403,7 +402,10 @@ class GoogleDriveTask:
         data = aiter_data(reader, self.bar.update, STEP_SIZE, length=length)
 
         r = await ahttpx.put(self._upload_url, data=data, headers=headers)
-        raise_for_status(r)
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self.client._handle_status_error(e)
 
         if r.status_code == 308:
             header_range = r.headers.get("Range")
