@@ -169,7 +169,16 @@ class GoogleDriveClient:
             if seconds > 0:
                 await asyncio.sleep(seconds)
 
-    def sleep(self, seconds=CLIENT_SLEEP_TIME):
+    def _handle_status_error(self, e):
+        if e.status_code == 429:
+            client_sleep_time = int(e.response.headers.get("Retry-After"))
+            self._sleep(client_sleep_time)
+        elif e.status_code // 100 == 4 and "LimitExceeded" in e.response.text:
+            self._sleep(CLIENT_SLEEP_TIME)
+
+        raise e
+
+    def _sleep(self, seconds=CLIENT_SLEEP_TIME):
         self._sleep_until = int(time.time()) + seconds
 
     async def get_file_by_id(self, file_id, fields=("id", "name", "mimeType")):
@@ -179,7 +188,11 @@ class GoogleDriveClient:
         headers = await self._get_headers()
 
         r = await ahttpx.get(DRIVE_URL + "/" + file_id, headers=headers, params=params)
-        raise_for_status(r)
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self._handle_status_error(e)
+
         return r.json()
 
     async def list_files_by_params(self, params):
@@ -190,7 +203,11 @@ class GoogleDriveClient:
         r = await ahttpx.get(
             DRIVE_URL, headers=headers, params=self._get_params(params)
         )
-        raise_for_status(r)
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self._handle_status_error(e)
+
         return r.json()
 
     async def list_files_by_query(
@@ -227,6 +244,24 @@ class GoogleDriveClient:
         query = " and ".join(query_list)
         return await self.list_files_by_query(query, fields)
 
+    async def _create_file_by_name(self, parent_id, name, is_folder):
+        await self._wait_for_sleep()
+
+        params = {"supportsAllDrives": "true"}
+        headers = await self._get_headers()
+
+        data = {"name": name, "parents": [parent_id]}
+        if is_folder:
+            data.update({"mimeType": FOLDER_MIMETYPE})
+
+        r = await ahttpx.post(DRIVE_URL, headers=headers, params=params, json=data)
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self._handle_status_error(e)
+
+        return r.json()
+
     async def create_file_by_name(self, parent_id, name, is_folder):
         exist_files = (
             await self.list_files_by_name(
@@ -236,18 +271,27 @@ class GoogleDriveClient:
 
         if exist_files:
             return exist_files[0]
+        else:
+            return await self._create_file_by_name(parent_id, name, is_folder)
 
+    async def _copy_file_by_name(self, source_id, dest_id, name):
         await self._wait_for_sleep()
+
         params = {"supportsAllDrives": "true"}
-
-        data = {"name": name, "parents": [parent_id]}
-        if is_folder:
-            data.update({"mimeType": FOLDER_MIMETYPE})
-
+        data = {"name": name, "parents": [dest_id]}
         headers = await self._get_headers()
 
-        r = await ahttpx.post(DRIVE_URL, headers=headers, params=params, json=data)
-        raise_for_status(r)
+        r = await ahttpx.post(
+            DRIVE_URL + "/" + source_id + "/copy",
+            headers=headers,
+            json=data,
+            params=params,
+        )
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self._handle_status_error(e)
+
         return r.json()
 
     async def copy_file_by_name(self, source_id, dest_id, name):
@@ -259,20 +303,25 @@ class GoogleDriveClient:
 
         if exist_files:
             return True
+        else:
+            return await self._copy_file_by_name(source_id, dest_id, name)
 
+    async def _get_upload_url(self, parent_id, name):
         await self._wait_for_sleep()
-        params = {"supportsAllDrives": "true"}
-        data = {"name": name, "parents": [dest_id]}
+
+        params = {"uploadType": "resumable", "supportsAllDrives": "true"}
+        data = {"name": name, "parents": [parent_id]}
         headers = await self._get_headers()
 
         r = await ahttpx.post(
-            DRIVE_URL + "/" + source_id + "/copy",
-            headers=headers,
-            json=data,
-            params=params,
+            DRIVE_UPLOAD_URL, headers=headers, json=data, params=params
         )
-        raise_for_status(r)
-        return r.json()
+        try:
+            raise_for_status(r)
+        except HttpStatusError as e:
+            self._handle_status_error(e)
+
+        return r.headers["Location"]
 
     async def get_upload_url(self, parent_id, name):
         exist_files = (
@@ -283,26 +332,13 @@ class GoogleDriveClient:
 
         if exist_files:
             return True
-
-        await self._wait_for_sleep()
-
-        params = {"uploadType": "resumable", "supportsAllDrives": "true"}
-        headers = await self._get_headers()
-        data = {"name": name, "parents": [parent_id]}
-
-        r = await ahttpx.post(
-            DRIVE_UPLOAD_URL, headers=headers, json=data, params=params
-        )
-        raise_for_status(r)
-        return r.headers["Location"]
+        else:
+            return await self._get_upload_url(parent_id, name)
 
     async def get_download_info(self, file_id):
-        await self._wait_for_sleep()
-
         url = DRIVE_URL + "/" + file_id
         params = {"alt": "media", "supportsAllDrives": "true"}
         headers = await self._get_headers()
-
         return url, params, headers
 
 
@@ -354,17 +390,6 @@ class GoogleDriveTask:
 
     def set_bar_info(self):
         self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
-
-    def _handle_status_error(self, e):
-        if e.status_code == 429:
-            client_sleep_time = int(e.response.headers.get("Retry-After"))
-            self.client.sleep(client_sleep_time)
-        elif e.status_code // 100 == 4 and "LimitExceeded" in e.response.text:
-            self.client.sleep(CLIENT_SLEEP_TIME)
-
-        raise TaskFailError(
-            path=self.total_path, task=self, error_msg=str(e), traceback=False
-        )
 
     async def _upload_single_chunk(self, reader, start):
         end = min(start + CHUNK_SIZE, self.file.get_size())
@@ -432,8 +457,9 @@ class GoogleDriveTask:
             raise e
 
         except HttpStatusError as e:
-            self._handle_status_error(e)
-
+            raise TaskFailError(
+                path=self.total_path, task=self, error_msg=str(e), traceback=False
+            )
         except Exception as e:
             raise TaskFailError(
                 path=self.total_path,
