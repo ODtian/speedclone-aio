@@ -574,11 +574,14 @@ class GoogleDriveFiles(GoogleDriveBase):
             async for i in self._list_items(item, page_token):
                 yield i
 
-        async with aiostream.stream.merge(
-            *map(self._list_items, folders)
-        ).stream() as streamer:
-            async for i in streamer:
+        for folder in folders:
+            async for i in self._list_items(folder):
                 yield i
+        # async with aiostream.stream.merge(
+        #     *map(self._list_items, folders)
+        # ).stream() as streamer:
+        #     async for i in streamer:
+        #         yield i
 
     async def iter_file(self):
         base_item = await self._get_base_item()
