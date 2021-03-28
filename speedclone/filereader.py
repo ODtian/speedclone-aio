@@ -1,5 +1,5 @@
 import asyncio
-import logging
+
 import aiofiles
 import aiostream
 from httpx import AsyncClient
@@ -38,7 +38,6 @@ class SequentialQueue:
             index, data = result
 
             if index == self._index:
-                logging.info(self._index)
                 self._index += 1
                 yield data
             else:
@@ -46,13 +45,11 @@ class SequentialQueue:
 
             for index, data in sorted(self._buffer.items(), key=lambda item: item[0]):
                 if index == self._index:
-                    logging.info(self._index)
                     yield data
                     self._buffer.pop(index)
                     self._index += 1
 
     async def put(self, index, data):
-        logging.info((index, len(data)))
         await self._queue.put((index, data))
 
     async def close(self, exc=None):

@@ -42,14 +42,14 @@ def parse_args():
 
     parser.add_argument(
         "--step-size",
-        default=20 * (1024 ** 2),
+        default=1024 ** 2,
         type=int,
         help="Size of chunk when updating the progress bar.",
     )
 
     parser.add_argument(
         "--download-chunk-size",
-        default=1024 ** 2,
+        default=10 * (1024 ** 2),
         type=int,
         help="Size of single request in downloading.",
     )
@@ -60,13 +60,6 @@ def parse_args():
         type=str,
         help="HTTP proxy",
     )
-
-    # parser.add_argument(
-    #     "--http-args",
-    #     default={},
-    #     type=json.loads,
-    #     help="HTTP arguments formated in the python dict",
-    # )
 
     parser.add_argument(
         "--client-sleep-time",
@@ -88,7 +81,7 @@ def parse_args():
 
     parser.add_argument(
         "--max-download-workers",
-        default=2,
+        default=3,
         type=int,
         help="Max workers when downloading the file.",
     )
