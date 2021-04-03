@@ -1,46 +1,46 @@
 {
-  "transmitter": {
+  "transport": {
     "lf": {
-      "mod": "transmitter.localfile",
+      "mod": "transport.localfile",
       "cls": {
         "source": "LocalFiles",
         "target": "LocalFileTasks"
       }
     },
     "115": {
-      "mod": "transmitter.cloud115",
+      "mod": "transport.cloud115",
       "cls": {
         "source": "Cloud115Files",
         "target": "Cloud115Tasks"
       }
     },
     "115hash": {
-      "mod": "transmitter.cloud115",
+      "mod": "transport.cloud115",
       "cls": {
         "source": "Cloud115HashFiles"
       }
     },
     "gd": {
-      "mod": "transmitter.googledrive",
+      "mod": "transport.googledrive",
       "cls": {
         "source": "GoogleDriveFiles",
         "target": "GoogleDriveTasks"
       }
     },
     "odshare": {
-      "mod": "transmitter.onedriveshare",
+      "mod": "transport.onedriveshare",
       "cls": {
         "source": "OnedriveShareFiles"
       }
     },
     "aria2": {
-      "mod": "transmitter.aria2",
+      "mod": "transport.aria2",
       "cls": {
         "target": "Aria2Tasks"
       }
     },
     "count": {
-      "mod": "transmitter.count",
+      "mod": "transport.count",
       "cls": {
         "target": "CountTasks"
       }
@@ -58,22 +58,22 @@
   },
   "setting": {
     "lf": {
-      "transmitter": "lf"
+      "transport": "lf"
     },
     "115": {
-      "transmitter": "115",
+      "transport": "115",
       "oss_token_url": "https://uplb.115.com/3.0/gettoken.php",
       "oss_endpoint": "https://oss-cn-shenzhen.aliyuncs.com",
       "cookies": ""
     },
     "115hash": {
-      "transmitter": "115hash",
+      "transport": "115hash",
       "oss_token_url": "https://uplb.115.com/3.0/gettoken.php",
       "oss_endpoint": "https://oss-cn-shenzhen.aliyuncs.com",
       "cookies": ""
     },
     "gd": {
-      "transmitter": "gd",
+      "transport": "gd",
       "token_path": "",
       "root_folder_id": "root",
       "service_account": false,
@@ -84,7 +84,7 @@
       }
     },
     "gdtm": {
-      "transmitter": "gd",
+      "transport": "gd",
       "token_path": "",
       "root_folder_id": "",
       "service_account": false,
@@ -95,7 +95,7 @@
       }
     },
     "gdshare": {
-      "transmitter": "gd",
+      "transport": "gd",
       "token_path": "",
       "root_folder_id": "",
       "service_account": false,
@@ -106,15 +106,15 @@
       }
     },
     "aria2": {
-      "transmitter": "aria2",
+      "transport": "aria2",
       "url": "http://127.0.0.1:6800/jsonrpc",
       "token": ""
     },
     "odshare": {
-      "transmitter": "odshare"
+      "transport": "odshare"
     },
     "count": {
-      "transmitter": "count"
+      "transport": "count"
     }
   }
 }

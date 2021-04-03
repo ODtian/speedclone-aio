@@ -2,9 +2,18 @@ import argparse
 import json
 import os
 
-
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-args_dict = {}
+args_dict = {
+    "CHUNK_SIZE": 20 * (1024 ** 2),
+    "STEP_SIZE": 1024 ** 2,
+    "DOWNLOAD_CHUNK_SIZE": 1024 ** 2,
+    "PROXY": None,
+    "CLIENT_SLEEP_TIME": 10,
+    "MAX_CLIENTS": 10,
+    "MAX_PAGE_SIZE": 100,
+    "MAX_DOWNLOAD_WORKERS": 3,
+    "ARIA2_POLLING_INTERVAL": 1,
+}
 
 
 def parse_args():
@@ -12,6 +21,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "-I",
         "--interval",
         default=0.05,
         type=float,
@@ -19,14 +29,15 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--max-workers", default=10, type=int, help="The number of workers."
+        "-W", "--max-workers", default=10, type=int, help="The number of workers."
     )
 
     parser.add_argument(
-        "--bar", default="common", type=str, help="Name of the progress bar."
+        "-B", "--bar", default="common", type=str, help="Name of the progress bar."
     )
 
     parser.add_argument(
+        "-C",
         "--conf",
         default=os.path.join(BASE_DIR, "..", "conf.json"),
         type=str,
@@ -42,7 +53,7 @@ def parse_args():
 
     parser.add_argument(
         "--step-size",
-        default=10 * (1024 ** 2),
+        default=1024 ** 2,
         type=int,
         help="Size of chunk when updating the progress bar.",
     )
@@ -93,10 +104,14 @@ def parse_args():
         help="Aria2 polling interval.",
     )
 
-    args, rest = parser.parse_known_args()
+    args, paths = parser.parse_known_args()
 
     if os.path.exists(args.conf):
-        conf = json.load(open(args.conf, "r"))
+        config = json.load(open(args.conf, "r"))
+
+        args_dict["INTERVAL"] = args.interval
+        args_dict["MAX_WORKERS"] = args.max_workers
+        args_dict["MAX_RETRIES"] = args.max_retries
 
         args_dict["CHUNK_SIZE"] = args.chunk_size
         args_dict["STEP_SIZE"] = args.step_size
@@ -110,6 +125,6 @@ def parse_args():
         args_dict["MAX_DOWNLOAD_WORKERS"] = args.max_download_workers
         args_dict["ARIA2_POLLING_INTERVAL"] = args.aria2_polling_interval
 
-        return args, rest, conf
+        return paths, args, config
     else:
         raise FileNotFoundError("Config file does not exist.")

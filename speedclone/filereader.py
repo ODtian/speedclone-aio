@@ -1,7 +1,8 @@
 import asyncio
 
 import aiofiles
-import aiostream
+
+# import aiostream
 from httpx import AsyncClient
 
 from .args import args_dict
@@ -9,54 +10,136 @@ from .utils import raise_for_status
 
 PROXY = args_dict["PROXY"]
 
+asyncio.open_connection()
 
-class SequentialQueue:
-    def __init__(self, start=0):
-        self._queue = asyncio.Queue()
-        self._buffer = {}
-        self._index = start
 
-        self.items = self._items()
+class StreamTransport:
+    def __init__(self, loop=asyncio.get_event_loop(), limit=(0, 0)):
+        self._loop = loop
 
-    async def __aenter__(self):
-        return self
+        self._read_waiter = self._loop.create_future()
+        self._write_waiter = self._loop.create_future()
+        self._write_waiter.set_result(None)
 
-    async def __aexit__(self, exc_type, exc, tb):
-        await self.close(exc)
-        return True
+        self._finished = False
+        self._buffer = bytearray()
+        self._low_level, self._high_level = limit
+        if self._low_level > self._high_level:
+            raise ValueError("low level must be lower than high level")
 
-    async def _items(self):
-        while True:
-            result = await self._queue.get()
+        self._exception = None
 
-            if result is None:
-                break
+    def _pause_read(self):
+        if self._read_waiter.done():
+            self._read_waiter = self._loop.create_future()
 
-            if result[0] == "exc":
-                raise result[1]
+    def _resume_read(self):
+        if not self._read_waiter.done():
+            self._read_waiter.set_result(None)
 
-            index, data = result
+    def _maybe_resume_write(self):
+        if len(self._buffer) <= self._low_level and not self._write_waiter.done():
+            self._write_waiter.set_result(None)
 
-            if index == self._index:
-                self._index += 1
-                yield data
-            else:
-                self._buffer[index] = data
+    def _maybe_pause_write(self):
+        if len(self._buffer) > self._high_level and self._write_waiter.done():
+            self._write_waiter = self._loop.create_future()
 
-            for index, data in sorted(self._buffer.items(), key=lambda item: item[0]):
-                if index == self._index:
-                    yield data
-                    self._buffer.pop(index)
-                    self._index += 1
-
-    async def put(self, index, data):
-        await self._queue.put((index, data))
-
-    async def close(self, exc=None):
+    def close(self, exc=None):
+        self._finished = True
+        self._resume_read()
         if exc is not None:
-            await self._queue.put(("exc", exc))
+            self._exception = exc
+
+    async def write(self, data):
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            raise ValueError(
+                f"data must be bytes, bytearray or memoryview and not {type(data)}"
+            )
+
+        await self._write_waiter
+        self._buffer.extend(data)
+        self._maybe_pause_write()
+        self._resume_read()
+
+    async def read(self, n):
+        if n < 0:
+            raise ValueError("size can not be less than zero")
+
+        if self._exception is not None:
+            raise self._exception
+
+        if n == 0:
+            return b""
+
+        # if write_waiter is waiting,
+        # no more data will write to buffer,
+        # then just flush all data,
+        # n of data is high_level - 1
+        while len(self._buffer) < n and self._write_waiter.done():
+            if self._finished:
+                break
+            self._pause_read()
+            await self._read_waiter
+
+        if len(self._buffer) == n:
+            data = bytes(self._buffer)
+            self._buffer.clear()
         else:
-            await self._queue.put(None)
+            data = bytes(self._buffer[:n])
+            del self._buffer[:n]
+
+        self._maybe_resume_write()
+        return data
+
+
+# class SequentialQueue:
+#     def __init__(self, start=0):
+#         self._queue = asyncio.Queue()
+#         self._buffer = {}
+#         self._index = start
+
+#         self.items = self._items()
+
+#     async def __aenter__(self):
+#         return self
+
+#     async def __aexit__(self, exc_type, exc, tb):
+#         await self.close(exc)
+#         return True
+
+#     async def _items(self):
+#         while True:
+#             result = await self._queue.get()
+
+#             if result is None:
+#                 break
+
+#             if result[0] == "exc":
+#                 raise result[1]
+
+#             index, data = result
+
+#             if index == self._index:
+#                 self._index += 1
+#                 yield data
+#             else:
+#                 self._buffer[index] = data
+
+#             for index, data in sorted(self._buffer.items(), key=lambda item: item[0]):
+#                 if index == self._index:
+#                     yield data
+#                     self._buffer.pop(index)
+#                     self._index += 1
+
+#     async def put(self, index, data):
+#         await self._queue.put((index, data))
+
+#     async def close(self, exc=None):
+#         if exc is not None:
+#             await self._queue.put(("exc", exc))
+#         else:
+#             await self._queue.put(None)
 
 
 class LocalFileReader:
@@ -99,27 +182,38 @@ class HttpFileReader:
         self.start, self.end, self.range_size = data_range
         self.max_workers = max_workers
 
-        self._sequential_queue = SequentialQueue(start=0)
-        self._streamer_future = None
-        self._buffer = bytearray(b"")
+        self._loop = asyncio.get_event_loop()
+        self._transport = StreamTransport(
+            loop=self._loop,
+            limit=(self.range_size * max_workers, self.range_size * max_workers),
+        )
+        # self._sequential_queue = SequentialQueue(start=0)
 
+        self._streamer_future = None
+        # self._buffer = bytearray(b"")
+        self._chunk_finished = {}
         self._closed = False
 
     async def __aenter__(self):
-        loop = asyncio.get_event_loop()
-        self._streamer_future = asyncio.run_coroutine_threadsafe(self._streamer(), loop)
+        self._streamer_future = asyncio.run_coroutine_threadsafe(
+            self._streamer(), self._loop
+        )
         return self
 
     async def __aexit__(self, *args, **kwargs):
         self._streamer_future.cancel()
-        del self._sequential_queue
         self._closed = True
 
     def _genarate_range(self):
-        range_for_clients = [
-            (index, left, min(left + self.range_size, self.end))
-            for index, left in enumerate(range(self.start, self.end, self.range_size))
-        ]
+        range_for_clients = []
+
+        for index, left in enumerate(range(self.start, self.end, self.range_size)):
+            range_for_clients.append(
+                (index, left, min(left + self.range_size, self.end))
+            )
+            self._chunk_finished[index] = self._loop.create_future()
+
+        self._chunk_finished[index].set_result(0)
 
         for i in range(self.max_workers):
             range_for_worker = range_for_clients[i :: self.max_workers]
@@ -129,35 +223,114 @@ class HttpFileReader:
     async def _client_request(self, request_range):
         async with AsyncClient(**self.request_args, proxies=PROXY) as client:
             for index, start, end in request_range:
-                r = await client.get(
-                    self.url, headers={"Range": f"bytes={start}-{end - 1}"}
+                r = await client.stream(
+                    "GET", self.url, headers={"Range": f"bytes={start}-{end - 1}"}
                 )
                 raise_for_status(r)
-                yield index, r.content
+
+                chunk_finished = self._chunk_finished[max(index - 1, 0)]
+                buffer = bytearray()
+
+                async for data in r.aiter_bytes():
+                    buffer.extend(data)
+                    if chunk_finished.done():
+                        await self._transport.write(buffer)
+                        buffer.clear()
+
+                if len(buffer) != 0:
+                    await chunk_finished
+                    await self._transport.write(buffer)
 
     async def _streamer(self):
         try:
-            async with self._sequential_queue:
-                client_requests = [
-                    self._client_request(r) for r in self._genarate_range()
-                ]
-                async with aiostream.stream.merge(
-                    *client_requests
-                ).stream() as streamer:
-                    async for i, data in streamer:
-                        await self._sequential_queue.put(i, data)
+            await asyncio.gather(
+                self._client_request(r) for r in self._genarate_range()
+            )
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            self._transport.close(exc=e)
+        else:
+            self._transport.close()
 
     async def read(self, n):
         if self._closed:
-            raise ValueError("read of closed file")
+            raise ValueError("Cannot read a closed file")
+        return await self._transport.read(n)
 
-        async for data in self._sequential_queue.items:
-            self._buffer += data
-            if len(self._buffer) >= n:
-                break
 
-        result = self._buffer[:n]
-        del self._buffer[:n]
-        return bytes(result)
+# class HttpFileReader:
+#     def __init__(
+#         self,
+#         url,
+#         data_range,
+#         max_workers,
+#         **request_args,
+#     ):
+#         self.url = url
+#         self.request_args = request_args
+#         self.start, self.end, self.range_size = data_range
+#         self.max_workers = max_workers
+
+#         self._sequential_queue = SequentialQueue(start=0)
+#         self._streamer_future = None
+#         self._buffer = bytearray(b"")
+
+#         self._closed = False
+
+#     async def __aenter__(self):
+#         loop = asyncio.get_event_loop()
+#         self._streamer_future = asyncio.run_coroutine_threadsafe(self._streamer(), loop)
+#         return self
+
+#     async def __aexit__(self, *args, **kwargs):
+#         self._streamer_future.cancel()
+#         del self._sequential_queue
+#         self._closed = True
+
+#     def _genarate_range(self):
+#         range_for_clients = [
+#             (index, left, min(left + self.range_size, self.end))
+#             for index, left in enumerate(range(self.start, self.end, self.range_size))
+#         ]
+
+#         for i in range(self.max_workers):
+#             range_for_worker = range_for_clients[i :: self.max_workers]
+#             if range_for_worker:
+#                 yield range_for_worker
+
+#     async def _client_request(self, request_range):
+#         async with AsyncClient(**self.request_args, proxies=PROXY) as client:
+#             for index, start, end in request_range:
+#                 r = await client.get(
+#                     self.url, headers={"Range": f"bytes={start}-{end - 1}"}
+#                 )
+#                 raise_for_status(r)
+#                 yield index, r.content
+
+#     async def _streamer(self):
+#         try:
+#             async with self._sequential_queue:
+#                 client_requests = [
+#                     self._client_request(r) for r in self._genarate_range()
+#                 ]
+#                 async with aiostream.stream.merge(
+#                     *client_requests
+#                 ).stream() as streamer:
+#                     async for i, data in streamer:
+#                         await self._sequential_queue.put(i, data)
+#         except asyncio.CancelledError:
+#             pass
+
+#     async def read(self, n):
+#         if self._closed:
+#             raise ValueError("read of closed file")
+
+#         async for data in self._sequential_queue.items:
+#             self._buffer += data
+#             if len(self._buffer) >= n:
+#                 break
+
+#         result = self._buffer[:n]
+#         del self._buffer[:n]
+#         return bytes(result)

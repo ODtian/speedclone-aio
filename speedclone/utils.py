@@ -25,21 +25,13 @@ async def aenumerate(asequence, start=0):
         n += 1
 
 
-async def aiter_data(reader, update, step_size, length=None):
-    if length is None:
-        while True:
-            data = await reader.read(step_size)
-            if not data:
-                break
-            yield data
-            update(len(data))
-    else:
-        while length > 0:
-            data_len = min(length, step_size)
-            data = await reader.read(step_size)
-            yield data
-            length -= data_len
-            update(data_len)
+async def aiter_data(reader, update, step_size, length):
+    while length > 0:
+        data_len = min(length, step_size)
+        data = await reader.read(step_size)
+        yield data
+        length -= data_len
+        update(data_len)
 
 
 GMT_FORMAT = "%a, %d %b %Y %H:%M:%S GMT"

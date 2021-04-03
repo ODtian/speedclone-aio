@@ -20,13 +20,13 @@ class CountTask:
 
 
 class CountTasks:
-    def __init__(self, target_path):
-        self.target_path = target_path
+    def __init__(self, path):
+        self._path = path
 
     @classmethod
-    def get_trans(cls, path, config):
-        return cls(target_path=path)
+    def transport_factory(cls, path):
+        return cls(path=path)
 
     async def get_task(self, file):
-        total_path = format_path(self.target_path, file.get_relative_path())
+        total_path = format_path(self._path, file.get_relative_path())
         return CountTask(total_path, file)

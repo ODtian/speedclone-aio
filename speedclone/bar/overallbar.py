@@ -1,5 +1,4 @@
 from tqdm.autonotebook import tqdm
-from .basebar import BaseBarManager
 
 
 class VirtualBar:
@@ -25,45 +24,46 @@ class VirtualBar:
 
 class OverallBar:
     def __init__(self):
-        self.bar = self.create_bar()
         self.tasks_total = 0
         self.tasks_counted = 0
 
-    def create_bar(self):
+        self._bar = None
+        self._create_bar()
+
+    def _create_bar(self):
         bar_format = "| {desc} | {percentage: >6.2f}% |{bar:20}| {n_fmt:>6} / {total_fmt:<6} [{rate_fmt:<8} {elapsed}>{remaining}]"
-        bar = tqdm(
+        self._bar = tqdm(
             total=0,
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
             bar_format=bar_format,
         )
-        return bar
 
-    def get_tasks_count(self):
-        return "tasks: {} / {}".format(self.tasks_counted, self.tasks_total)
+    def _get_tasks_count(self):
+        return f"tasks: {self.tasks_counted} / {self.tasks_total}"
 
-    def refresh_tasks_count(self):
-        self.bar.desc = self.get_tasks_count()
-        self.bar.refresh()
+    def _refresh_tasks_count(self):
+        self._bar.desc = self._get_tasks_count()
+        self._bar.refresh()
 
     def add_counted_bytes(self, n):
-        self.bar.update(n)
+        self._bar.update(n)
 
     def add_total_bytes(self, n):
-        self.bar.total += n
-        self.bar.refresh()
+        self._bar.total += n
+        self._bar.refresh()
 
     def add_counted_tasks(self, n):
         self.tasks_counted += n
-        self.refresh_tasks_count()
+        self._refresh_tasks_count()
 
     def add_total_tasks(self, n):
         self.tasks_total += n
-        self.refresh_tasks_count()
+        self._refresh_tasks_count()
 
 
-class OverallBarManager(BaseBarManager):
+class OverallBarManager:
     def __init__(self):
         self.bar = OverallBar()
 

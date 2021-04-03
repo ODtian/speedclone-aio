@@ -25,30 +25,28 @@ class TaskError(Exception):
     level = logging.DEBUG
     task_exit = False
     traceback = False
-
-
-class TaskNotDoneError(TaskError):
-    level = logging.ERROR
-
-    def __init__(self, path, task):
-        self.msg = f"Task at '{path}' not uploaded completely, will try again."
-        self.task = task
+    msg = ""
 
 
 class TaskFailError(TaskError):
     level = logging.ERROR
 
-    def __init__(self, path, task, error_msg, task_exit=False, traceback=True):
+    def __init__(self, path, error_msg, task_exit=False, traceback=True):
         self.msg = f"Task at '{path}' failed: {error_msg}"
-        self.task = task
         self.task_exit = task_exit
         self.traceback = traceback
+
+
+class TaskNotDoneError(TaskError):
+    level = logging.ERROR
+
+    def __init__(self, path):
+        self.msg = f"Task at '{path}' not uploaded completely, will try again."
 
 
 class TaskExistError(TaskError):
     level = logging.INFO
     task_exit = True
 
-    def __init__(self, path, task):
+    def __init__(self, path):
         self.msg = f"Task at '{path}' already exists."
-        self.task = task

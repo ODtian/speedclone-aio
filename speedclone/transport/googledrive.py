@@ -412,13 +412,12 @@ class GoogleDriveTask:
             if header_range is None or header_range.lstrip("bytes=0-") != str(end - 1):
                 raise TaskFailError(
                     path=self.total_path,
-                    task=self,
                     error_msg="Range was missed when uploading file.",
                 )
 
         elif "id" not in r.json().keys():
             raise TaskFailError(
-                path=self.total_path, task=self, error_msg="Upload was not successful."
+                path=self.total_path, error_msg="Upload was not successful."
             )
         else:
             self._uploaded_bytes += length
@@ -433,7 +432,7 @@ class GoogleDriveTask:
                 )
 
                 if copy_r is True:
-                    raise TaskExistError(path=self.total_path, task=self)
+                    raise TaskExistError(path=self.total_path)
 
                 if "id" in copy_r:
                     self.bar.update(self.file.get_size())
@@ -443,7 +442,7 @@ class GoogleDriveTask:
                         folder_id, self.name
                     )
                     if upload_url_r is True:
-                        raise TaskExistError(path=self.total_path, task=self)
+                        raise TaskExistError(path=self.total_path)
 
                     self._upload_url = upload_url_r
 
@@ -459,37 +458,34 @@ class GoogleDriveTask:
             raise e
 
         except HttpStatusError as e:
-            raise TaskFailError(
-                path=self.total_path, task=self, error_msg=str(e), traceback=False
-            )
+            raise TaskFailError(path=self.total_path, error_msg=str(e), traceback=False)
+
         except Exception as e:
-            raise TaskFailError(
-                path=self.total_path,
-                task=self,
-                error_msg=type(e).__name__,
-            )
+            raise TaskFailError(path=self.total_path, error_msg=type(e).__name__)
 
         else:
             if not self.bar.is_finished():
-                raise TaskNotDoneError(path=self.total_path, task=self)
+                raise TaskNotDoneError(path=self.total_path)
 
 
 class GoogleDriveBase:
-    clients = []
+    _clients = []
 
     @classmethod
-    def get_trans(cls, path, config):
-        token_path = config["token_path"]
-
+    def transport_factory(
+        cls,
+        path,
+        token_path="",
+        root_folder_id="root",
+        service_account=False,
+        drive_id="",
+        credit={"client_id": "", "client_secret": ""},
+    ):
         if os.path.exists(token_path):
-            root_folder_id = config.get("root_folder_id", "")
             path = format_path(root_folder_id, path)
-            use_service_account = config.get("service_account", False)
-            drive_id = config.get("drive_id", "")
-
             clients = []
 
-            if use_service_account:
+            if service_account:
                 for credit_path in iter_path(token_path):
                     token_backend = GoogleServiceAccountTokenBackend(
                         credit_path=credit_path
@@ -499,8 +495,6 @@ class GoogleDriveBase:
                     )
                     clients.append(client)
             else:
-
-                credit = config["credit"]
                 token_backend = GoogleTokenBackend(token_path=token_path, credit=credit)
                 client = GoogleDriveClient(
                     token_backend=token_backend, drive_id=drive_id
@@ -516,26 +510,26 @@ class GoogleDriveBase:
             raise Exception("Token path not exists")
 
     def _get_client(self):
-        client = self.clients.pop(0)
-        self.clients.append(client)
+        client = self._clients.pop(0)
+        self._clients.append(client)
         return client
 
 
 class GoogleDriveFiles(GoogleDriveBase):
     def __init__(self, path, clients):
-        self.source_path = path
-        self.clients = clients
+        self._path = path
+        self._clients = clients
 
-        self.root, *base_path = self.source_path.split("/")
-        self.base_path = format_path(*base_path)
+        self._root, *base_path = self._path.split("/")
+        self._base_path = format_path(*base_path)
 
     async def _get_base_item(self):
         client = self._get_client()
 
-        if self.base_path:
-            parent_id = self.root
+        if self._base_path:
+            parent_id = self._root
             item = None
-            paths = self.base_path.split("/")
+            paths = self._base_path.split("/")
 
             for i, name in enumerate(paths):
                 items = (
@@ -564,7 +558,7 @@ class GoogleDriveFiles(GoogleDriveBase):
                     parent_id = item["id"]
         else:
             return await client.get_file_by_id(
-                self.root, fields=("id", "name", "mimeType", "size")
+                self._root, fields=("id", "name", "mimeType", "size")
             )
 
     async def _list_items(self, item, page_token=None, client=None):
@@ -605,11 +599,6 @@ class GoogleDriveFiles(GoogleDriveBase):
         for folder in folders:
             async for i in self._list_items(folder):
                 yield i
-        # async with aiostream.stream.merge(
-        #     *map(self._list_items, folders)
-        # ).stream() as streamer:
-        #     async for i in streamer:
-        #         yield i
 
     async def iter_file(self):
         base_item = await self._get_base_item()
@@ -627,25 +616,25 @@ class GoogleDriveFiles(GoogleDriveBase):
 
 class GoogleDriveTasks(GoogleDriveBase):
     def __init__(self, path, clients):
-        self.target_path = path
-        self.clients = clients
+        self._path = path
+        self._clients = clients
 
-        self.root, *base_path = self.target_path.split("/")
-        self.base_path = format_path(*base_path)
+        self._root, *base_path = self._path.split("/")
+        self._base_path = format_path(*base_path)
 
-        self.loop = asyncio.get_event_loop()
-        root_future = self.loop.create_future()
-        root_future.set_result(self.root)
+        self._loop = asyncio.get_event_loop()
+        root_future = self._loop.create_future()
+        root_future.set_result(self._root)
 
-        self.dir_create = {"": root_future}
+        self._dir_create = {"": root_future}
 
     def _create_folder_future(self, path):
-        exist_future = self.dir_create.get(path)
+        exist_future = self._dir_create.get(path)
         if exist_future:
             return exist_future
         else:
-            future = self.loop.create_future()
-            self.dir_create[path] = future
+            future = self._loop.create_future()
+            self._dir_create[path] = future
 
             async def set_folder_id():
                 try:
@@ -664,12 +653,12 @@ class GoogleDriveTasks(GoogleDriveBase):
                 except Exception as e:
                     future.set_exception(e)
 
-            asyncio.run_coroutine_threadsafe(set_folder_id(), self.loop)
+            asyncio.run_coroutine_threadsafe(set_folder_id(), self._loop)
 
             return future
 
     async def get_task(self, file):
-        total_path = format_path(self.base_path, file.get_relative_path())
+        total_path = format_path(self._base_path, file.get_relative_path())
         base_path, name = os.path.split(total_path)
         folder_id_future = self._create_folder_future(base_path)
 

@@ -4,7 +4,8 @@ import datetime
 import hashlib
 import hmac
 import json
-import logging
+
+# import logging
 import math
 import os
 import time
@@ -622,7 +623,9 @@ class Cloud115Task:
                 )
 
                 async with (await self.file.get_reader()) as reader:
-                    data = aiter_data(reader, self.bar.update, STEP_SIZE)
+                    data = aiter_data(
+                        reader, self.bar.update, STEP_SIZE, self.file.get_size()
+                    )
                     await oss_upload.upload(
                         data=data, callback=callback, callback_var=callback_var
                     )
@@ -655,30 +658,33 @@ class Cloud115Task:
         except HttpStatusError as e:
             raise TaskFailError(
                 path=self.total_path,
-                task=self,
                 error_msg=str(e),
                 task_exit=e.status_code == 1414,
                 traceback=False,
             )
 
         except Exception as e:
-            raise TaskFailError(
-                path=self.total_path, task=self, error_msg=type(e).__name__
-            )
+            raise TaskFailError(path=self.total_path, error_msg=type(e).__name__)
 
         else:
             if not self.bar.is_finished():
-                raise TaskNotDoneError(path=self.total_path, task=self)
+                raise TaskNotDoneError(path=self.total_path)
 
 
 class Cloud115Base:
     @classmethod
-    def get_trans(cls, path, config):
-        endpoint = parse.urlparse(config["oss_endpoint"]).netloc
+    def transport_factory(
+        cls,
+        path,
+        oss_token_url="https://uplb.115.com/3.0/gettoken.php",
+        oss_endpoint="https://oss-cn-shenzhen.aliyuncs.com",
+        cookies="",
+    ):
+        endpoint = parse.urlparse(oss_endpoint).netloc
 
-        oss_token_backend = OSSTokenBackend(token_url=config["oss_token_url"])
+        oss_token_backend = OSSTokenBackend(token_url=oss_token_url)
         oss_client = OSSClient(endpoint=endpoint, token_backend=oss_token_backend)
-        client = Cloud115Client(cookies=config["cookies"], oss_client=oss_client)
+        client = Cloud115Client(cookies=cookies, oss_client=oss_client)
         client.init_user_info()
 
         return cls(path=path, client=client)
@@ -686,20 +692,20 @@ class Cloud115Base:
 
 class Cloud115Files(Cloud115Base):
     def __init__(self, path, client):
-        self.source_path = path
-        self.client = client
+        self._path = path
+        self._client = client
 
-        self.nodes = self.source_path.split("/")
-        self.nodes_len = len(self.nodes)
+        self._nodes = self._path.split("/")
+        self._nodes_len = len(self._nodes)
 
     async def _get_base_objects(self):
         cid = "0"
 
-        for i, n in enumerate(self.nodes, 1):
-            files = await self.client.list_files(cid=cid)
+        for i, n in enumerate(self._nodes, 1):
+            files = await self._client.list_files(cid=cid)
             files_same_name = tuple(filter(lambda f: f["n"] == n, files["data"]))
 
-            if i != self.nodes_len:
+            if i != self._nodes_len:
                 next_folders = filter(lambda f: f.get("fid") is None, files_same_name)
                 cid = tuple(next_folders)[0]["cid"]
             else:
@@ -716,9 +722,9 @@ class Cloud115Files(Cloud115Base):
         raise ValueError("No such file.")
 
     async def _list_files(self, cid, offset=0):
-        data = await self.client.list_files(cid, offset=offset)
+        data = await self._client.list_files(cid, offset=offset)
 
-        base_path = format_path(*[p["name"] for p in data["path"][self.nodes_len :]])
+        base_path = format_path(*[p["name"] for p in data["path"][self._nodes_len :]])
         dirs = []
 
         for f in data["data"]:
@@ -743,7 +749,7 @@ class Cloud115Files(Cloud115Base):
 
         for pick_code, sha1, name, size in files:
             yield Cloud115File(
-                name, size, self.client, pick_code=pick_code, total_hash=sha1
+                name, size, self._client, pick_code=pick_code, total_hash=sha1
             )
 
         for cid in folders:
@@ -751,7 +757,7 @@ class Cloud115Files(Cloud115Base):
                 yield Cloud115File(
                     relative_path,
                     size,
-                    self.client,
+                    self._client,
                     pick_code=pick_code,
                     total_hash=sha1,
                 )
@@ -759,17 +765,17 @@ class Cloud115Files(Cloud115Base):
 
 class Cloud115HashFiles(Cloud115Base):
     def __init__(self, path, client):
-        self.source_path = path
-        self.client = client
+        self._path = path
+        self._client = client
 
         self.files = []
-        if os.path.isfile(self.source_path):
-            with open(self.source_path, "r", encoding="utf-8") as f:
+        if os.path.isfile(self._path):
+            with open(self._path, "r", encoding="utf-8") as f:
                 for l in f:
 
                     self.files.append(self._split_link(l.strip()))
         else:
-            self.files.append(self._split_link(self.source_path))
+            self.files.append(self._split_link(self._path))
 
     def _split_link(self, link):
         name, size, total_hash, block_hash = link.lstrip("115://").split("|")
@@ -780,7 +786,7 @@ class Cloud115HashFiles(Cloud115Base):
             yield Cloud115File(
                 name,
                 size,
-                self.client,
+                self._client,
                 total_hash=total_hash,
                 block_hash=block_hash,
             )
@@ -788,37 +794,37 @@ class Cloud115HashFiles(Cloud115Base):
 
 class Cloud115Tasks(Cloud115Base):
     def __init__(self, path, client):
-        self.target_path = path
-        self.client = client
+        self._path = path
+        self._client = client
 
-        self.loop = asyncio.get_event_loop()
+        self._loop = asyncio.get_event_loop()
 
-        root = self.loop.create_future()
+        root = self._loop.create_future()
         root.set_result("0")
 
-        self.dir_create = {"": root}
+        self._dir_create = {"": root}
 
     def _create_folder_future(self, path):
-        exist_future = self.dir_create.get(path)
+        exist_future = self._dir_create.get(path)
         if exist_future:
             return exist_future
         else:
-            future = self.loop.create_future()
-            self.dir_create[path] = future
+            future = self._loop.create_future()
+            self._dir_create[path] = future
 
             async def set_folder_id():
                 parent_path, name = os.path.split(path)
                 parent_id_future = self._create_folder_future(parent_path)
                 parent_id = await parent_id_future
-                cid = await self.client.create_folder(parent_id, name)
+                cid = await self._client.create_folder(parent_id, name)
                 future.set_result(cid)
 
-            asyncio.run_coroutine_threadsafe(set_folder_id(), self.loop)
+            asyncio.run_coroutine_threadsafe(set_folder_id(), self._loop)
 
             return future
 
     async def get_task(self, file):
-        total_path = format_path(self.target_path, file.get_relative_path())
+        total_path = format_path(self._path, file.get_relative_path())
         base_path, _ = os.path.split(total_path)
         folder_id_future = self._create_folder_future(base_path)
-        return Cloud115Task(total_path, file, folder_id_future, self.client)
+        return Cloud115Task(total_path, file, folder_id_future, self._client)

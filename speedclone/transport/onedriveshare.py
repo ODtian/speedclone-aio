@@ -50,14 +50,14 @@ class OnedriveShareFile:
 
 
 class OnedriveShareFiles:
-    def __init__(self, source_path, cookies, tenant_name, account_name):
-        self.source_path = source_path
-        self.cookies = cookies
-        self.tenant_name = tenant_name
-        self.account_name = account_name
+    def __init__(self, path, cookies, tenant_name, account_name):
+        self._path = path
+        self._cookies = cookies
+        self._tenant_name = tenant_name
+        self._account_name = account_name
 
     @classmethod
-    def get_trans(cls, path, config):
+    def transport_factory(cls, path):
         parsed_url = parse.urlparse(path)
         tenant_name = parsed_url.netloc
         account_name = parsed_url.path.split("/")[4]
@@ -78,28 +78,28 @@ class OnedriveShareFiles:
         )
 
         return cls(
-            source_path=base_path,
+            path=base_path,
             cookies=cookies,
             tenant_name=tenant_name,
             account_name=account_name,
         )
 
     async def _list_items(self, ref_path):
-        url = f"https://{self.tenant_name}/personal/{self.account_name}/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream"
+        url = f"https://{self._tenant_name}/personal/{self._account_name}/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream"
 
         params = {
-            "@a1": f"'/personal/{self.account_name}/Documents'",
-            "RootFolder": f"/personal/{self.account_name}/Documents/{ref_path}",
+            "@a1": f"'/personal/{self._account_name}/Documents'",
+            "RootFolder": f"/personal/{self._account_name}/Documents/{ref_path}",
             "TryNewExperienceSingle": "True",
         }
 
-        headers = {"Content-Type": "application/json;odata=verbose"}
+        headers = {"Content-Type": "application/json; odata=verbose"}
 
         r = await ahttpx.post(
             url,
             params=params,
             headers=headers,
-            cookies=self.cookies,
+            cookies=self._cookies,
             json=STREAM_LIST_DATA,
         )
 
@@ -123,17 +123,17 @@ class OnedriveShareFiles:
                 yield item
 
     async def iter_file(self):
-        base_path, _ = os.path.split(self.source_path)
-        async for unique_id, path, size in self._list_items(self.source_path):
+        base_path, _ = os.path.split(self._path)
+        async for unique_id, path, size in self._list_items(self._path):
             relative_path = path[len(base_path) :]
             download_url = DOWNLOAD_URL.format(
-                tenant_name=self.tenant_name,
-                account_name=self.account_name,
+                tenant_name=self._tenant_name,
+                account_name=self._account_name,
                 unique_id=unique_id,
             )
             yield OnedriveShareFile(
                 download_url=download_url,
                 relative_path=relative_path,
                 size=size,
-                cookies=self.cookies,
+                cookies=self._cookies,
             )

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 
 import aioaria2
@@ -31,13 +30,11 @@ class Aria2Task:
         if not hasattr(self.file, "get_download_info"):
             raise TaskFailError(
                 path=self.total_path,
-                task=self,
                 error_msg="File can't download by aria2",
                 task_exit=True,
                 traceback=False,
             )
 
-        # pprint(await client.getVersion())
         downloaded_length = 0
         try:
             url, headers = await self.file.get_download_info()
@@ -63,14 +60,12 @@ class Aria2Task:
                 elif status["status"] == "error":
                     raise TaskFailError(
                         path=self.total_path,
-                        task=self,
                         error_msg=f"aria2 error code={status['errorCode']} {status['errorMessage']}",
                     )
 
                 elif status["status"] == "removed":
                     raise TaskFailError(
                         path=self.total_path,
-                        task=self,
                         error_msg="aria2 download removed",
                         task_exit=True,
                         traceback=False,
@@ -86,25 +81,23 @@ class Aria2Task:
             raise e
 
         except Exception as e:
-            raise TaskFailError(
-                path=self.total_path, task=self, error_msg=type(e).__name__
-            )
+            raise TaskFailError(path=self.total_path, error_msg=type(e).__name__)
 
         else:
             if not self.bar.is_finished():
-                raise TaskNotDoneError(path=self.total_path, task=self)
+                raise TaskNotDoneError(path=self.total_path)
 
 
 class Aria2Tasks:
-    def __init__(self, target_path, url, token):
-        self.target_path = target_path
-        self.client = aioaria2.Aria2HttpClient(url, token=token)
-        on_close_callbacks.append(self.client.close())
+    def __init__(self, path, url, token):
+        self._path = path
+        self._client = aioaria2.Aria2HttpClient(url, token=token)
+        on_close_callbacks.append(self._client.close())
 
     @classmethod
-    def get_trans(cls, path, config):
-        return cls(target_path=path, url=config["url"], token=config["token"])
+    def transport_factory(cls, path, url="http://127.0.0.1:6800/jsonrpc", token=""):
+        return cls(path=path, url=url, token=token)
 
     async def get_task(self, file):
-        total_path = format_path(self.target_path, file.get_relative_path())
-        return Aria2Task(total_path, file, self.client)
+        total_path = format_path(self._path, file.get_relative_path())
+        return Aria2Task(total_path, file, self._client)
