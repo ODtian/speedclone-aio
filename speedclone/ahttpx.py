@@ -1,50 +1,7 @@
 from httpx import AsyncClient
+
+from .args import Args
 from .manager import on_close_callbacks
-from .args import args_dict
-
-PROXY = args_dict["PROXY"]
-# sock_transport = None
-
-# try:
-#     from httpx_socks import AsyncProxyTransport
-# except ImportError:
-#     import logging
-
-#     logging.warning(
-#         "httpx-socks hasn't installed yet, it might cause some problems when using socks proxies."
-#     )
-# else:
-#     socks_transport = AsyncProxyTransport
-
-
-# def get_socks_proxies(proxies):
-#     if isinstance(proxies, str) and proxies.startswith("socks"):
-#         return proxies
-
-#     elif isinstance(proxies, dict):
-#         socks_proxies = [v for v in proxies.values() if v.startswith("socks")]
-
-#         if socks_proxies:
-#             return socks_proxies[0]
-
-
-# def create_
-
-# def create_client(cert=None, verify=True, timeout=None, trust_env=True, proxies=None):
-#     transport = None
-#     socks_proxies = get_socks_proxies(proxies)
-#     if socks_proxies:
-#         transport = socks_transport.from_url(socks_proxies)
-#         proxies = None
-
-#     return AsyncClient(
-#         cert=cert,
-#         verify=verify,
-#         timeout=timeout,
-#         trust_env=trust_env,
-#         proxies=proxies,
-#         transport=transport,
-#     )
 
 
 class Client:
@@ -88,7 +45,7 @@ class Client:
                 verify=verify,
                 timeout=timeout,
                 trust_env=trust_env,
-                proxies=proxies or PROXY,
+                proxies=proxies or Args.PROXY,
             )
 
         return await self._client.request(

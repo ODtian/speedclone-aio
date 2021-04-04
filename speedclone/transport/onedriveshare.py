@@ -4,13 +4,9 @@ from urllib import parse
 import httpx
 
 from .. import ahttpx
-from ..args import args_dict
+from ..args import Args
 from ..filereader import HttpFileReader
 from ..utils import format_path, parse_cookies, raise_for_status
-
-CHUNK_SIZE = args_dict["CHUNK_SIZE"]
-DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
-MAX_DOWNLOAD_WORKERS = args_dict["MAX_DOWNLOAD_WORKERS"]
 
 DOWNLOAD_URL = "https://{tenant_name}/personal/{account_name}/_layouts/15/download.aspx?UniqueId={unique_id}"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36 Edg/87.0.664.41"
@@ -44,8 +40,8 @@ class OnedriveShareFile:
         return HttpFileReader(
             self.download_url,
             headers={"Cookie": self.cookies},
-            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
-            max_workers=MAX_DOWNLOAD_WORKERS,
+            data_range=(start, end or self.size, Args.DOWNLOAD_CHUNK_SIZE),
+            max_workers=Args.MAX_DOWNLOAD_WORKERS,
         )
 
 

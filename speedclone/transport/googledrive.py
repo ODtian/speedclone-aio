@@ -1,7 +1,5 @@
 import asyncio
 import json
-
-# import logging
 import os
 import random
 import time
@@ -10,7 +8,7 @@ import aiofiles
 import jwt
 
 from .. import ahttpx
-from ..args import args_dict
+from ..args import Args
 from ..error import (
     HttpStatusError,
     TaskError,
@@ -18,26 +16,8 @@ from ..error import (
     TaskFailError,
     TaskNotDoneError,
 )
-from ..utils import (
-    aiter_data,
-    format_path,
-    iter_path,
-    parse_params,
-    raise_for_status,
-)
-
 from ..filereader import HttpFileReader
-
-CHUNK_SIZE = args_dict["CHUNK_SIZE"]
-STEP_SIZE = args_dict["STEP_SIZE"]
-DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
-
-CLIENT_SLEEP_TIME = args_dict["CLIENT_SLEEP_TIME"]
-
-MAX_CLIENTS = args_dict["MAX_CLIENTS"]
-MAX_PAGE_SIZE = args_dict["MAX_PAGE_SIZE"]
-MAX_DOWNLOAD_WORKERS = args_dict["MAX_DOWNLOAD_WORKERS"]
-
+from ..utils import aiter_data, format_path, iter_path, parse_params, raise_for_status
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SERVICE_ACCOUNT_TOKEN_SCOPE = "https://www.googleapis.com/auth/drive"
@@ -173,11 +153,11 @@ class GoogleDriveClient:
             client_sleep_time = int(e.response.headers.get("Retry-After"))
             self._sleep(client_sleep_time)
         elif e.status_code // 100 == 4 and "LimitExceeded" in e.response.text:
-            self._sleep(CLIENT_SLEEP_TIME)
+            self._sleep(Args.CLIENT_SLEEP_TIME)
 
         raise e
 
-    def _sleep(self, seconds=CLIENT_SLEEP_TIME):
+    def _sleep(self, seconds=Args.CLIENT_SLEEP_TIME):
         self._sleep_until = int(time.time()) + seconds
 
     async def get_file_by_id(self, file_id, fields=("id", "name", "mimeType")):
@@ -364,8 +344,8 @@ class GoogleDriveFile:
             url,
             params=params,
             headers=headers,
-            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
-            max_workers=MAX_DOWNLOAD_WORKERS,
+            data_range=(start, end or self.size, Args.DOWNLOAD_CHUNK_SIZE),
+            max_workers=Args.MAX_DOWNLOAD_WORKERS,
         )
 
 
@@ -383,15 +363,11 @@ class GoogleDriveTask:
         self._uploaded_bytes = 0
 
     def set_bar(self, bar):
-        if self.bar is None:
-            self.bar = bar
-            self.set_bar_info()
-
-    def set_bar_info(self):
-        self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
+        self.bar = bar
+        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
 
     async def _upload_single_chunk(self, reader, start):
-        end = min(start + CHUNK_SIZE, self.file.get_size())
+        end = min(start + Args.CHUNK_SIZE, self.file.get_size())
         length = end - start
 
         headers = {
@@ -399,7 +375,7 @@ class GoogleDriveTask:
             "Content-Length": str(length),
         }
 
-        data = aiter_data(reader, self.bar.update, STEP_SIZE, length=length)
+        data = aiter_data(reader, self.bar.update, Args.STEP_SIZE, length=length)
 
         r = await ahttpx.put(self._upload_url, data=data, headers=headers)
         try:
@@ -450,7 +426,7 @@ class GoogleDriveTask:
                     await self.file.get_reader(start=self._uploaded_bytes)
                 ) as reader:
                     for start in range(
-                        self._uploaded_bytes, self.file.get_size(), CHUNK_SIZE
+                        self._uploaded_bytes, self.file.get_size(), Args.CHUNK_SIZE
                     ):
                         await self._upload_single_chunk(reader, start)
 
@@ -503,7 +479,7 @@ class GoogleDriveBase:
 
             random.shuffle(clients)
 
-            clients = clients[: max(MAX_CLIENTS, 1)]
+            clients = clients[: max(Args.MAX_CLIENTS, 1)]
 
             return cls(path=path, clients=clients)
         else:
@@ -566,7 +542,7 @@ class GoogleDriveFiles(GoogleDriveBase):
 
         params = {
             "q": f"'{item['id']}' in parents and trashed = false",
-            "pageSize": MAX_PAGE_SIZE,
+            "pageSize": Args.MAX_PAGE_SIZE,
             "fields": ", ".join(
                 (
                     "nextPageToken",

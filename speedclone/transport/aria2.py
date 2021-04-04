@@ -3,12 +3,10 @@ import os
 
 import aioaria2
 
-from ..args import args_dict
+from ..args import Args
 from ..error import TaskError, TaskFailError, TaskNotDoneError
 from ..manager import on_close_callbacks
 from ..utils import format_path, parse_headers
-
-ARIA2_POLLING_INTERVAL = args_dict["ARIA2_POLLING_INTERVAL"]
 
 
 class Aria2Task:
@@ -19,12 +17,8 @@ class Aria2Task:
         self.client = client
 
     def set_bar(self, bar):
-        if self.bar is None:
-            self.bar = bar
-            self.set_bar_info()
-
-    def set_bar_info(self):
-        self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
+        self.bar = bar
+        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
 
     async def run(self):
         if not hasattr(self.file, "get_download_info"):
@@ -75,7 +69,7 @@ class Aria2Task:
                     self.bar.update(self.bar.bytes_total - self.bar.bytes_counted)
                     break
 
-                await asyncio.sleep(ARIA2_POLLING_INTERVAL)
+                await asyncio.sleep(Args.ARIA2_POLLING_INTERVAL)
 
         except TaskError as e:
             raise e

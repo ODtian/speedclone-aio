@@ -16,7 +16,7 @@ class HttpStatusError(Exception):
             (
                 f"{self.response.request.method} {self.response.status_code}\n"
                 + parse_headers(self.response.headers, join=": "),
-                self.response.text,
+                f"{self.response.text}\n",
             )
         )
 

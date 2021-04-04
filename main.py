@@ -9,13 +9,6 @@ from speedclone.manager import TransferManager, init_uvloop
 BASE_IMPORT_PATH = "speedclone."
 
 
-def update_setting(setting, args):
-    args_dict = vars(args)
-    for k in setting.keys():
-        setting[k].update(args_dict)
-    return setting
-
-
 def get_transports(paths):
     def _get_transport_from_path(path):
         sep_path = path.split(":/")
@@ -35,9 +28,7 @@ def get_transport_instance_peer(transport_peer):
     def _get_transport_instance(t):
         mod = t["transport"]["mod"]
         cls = t["transport"]["cls"][t["as"]]
-        return import_cls(mod=mod, cls=cls).transport_factory(
-            path=t["path"], **t["config"]
-        )
+        return import_cls(mod=mod, cls=cls).transport_factory(t["path"], **t["config"])
 
     return tuple(map(_get_transport_instance, transport_peer))
 
@@ -46,23 +37,18 @@ async def main():
     init_logger()
     init_uvloop()
 
-    paths, args, config = parse_args()
-
-    setting = config["setting"]
-    transport_map = config["transport"]
-    bar_map = config["bar"]
+    paths, args, setting, transport_map, bar_map = parse_args()
 
     transport_chain = get_transports(paths)
     for transport in transport_chain:
         try:
             config = setting[transport["name"]]
-        except KeyError as e:
+        except KeyError:
             logging.error(f"Could not find config named '{transport['name']}'")
-            raise e
+            return
         else:
             transport["transport"] = transport_map[config["transport"]]
-            config.pop("transport")
-            transport["config"] = config
+            transport["config"] = {k: v for k, v in config.items() if k != "transport"}
 
     bar_manager_class = import_cls(**bar_map[args.bar])
     bar_manager = bar_manager_class()
@@ -85,13 +71,15 @@ async def main():
             max_retries=args.max_retries,
             chunk_size=args.chunk_size,
             step_size=args.step_size,
+            buffer_size=args.buffer_size,
             download_chunk_size=args.download_chunk_size,
+            max_download_workers=args.max_download_workers,
             proxy=args.proxy,
             client_sleep_time=args.client_sleep_time,
             max_clients=args.max_clients,
             max_page_size=args.max_page_size,
-            max_download_workers=args.max_download_workers,
             aria2_polling_interval=args.aria2_polling_interval,
+            failed_task_save_path=args.failed_task_save_path,
         )
 
 

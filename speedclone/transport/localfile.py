@@ -2,13 +2,10 @@ import os
 
 import aiofiles
 
-from ..args import args_dict
+from ..args import Args
 from ..error import TaskError, TaskExistError, TaskFailError, TaskNotDoneError
-from ..utils import format_path, iter_path
 from ..filereader import LocalFileReader
-
-CHUNK_SIZE = args_dict["CHUNK_SIZE"]
-STEP_SIZE = args_dict["STEP_SIZE"]
+from ..utils import format_path, iter_path
 
 
 class LocalFile:
@@ -36,12 +33,8 @@ class LocalFileTask:
         self._seek = 0
 
     def set_bar(self, bar):
-        if self.bar is None:
-            self.bar = bar
-            self.set_bar_info()
-
-    def set_bar_info(self):
-        self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
+        self.bar = bar
+        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
 
     def _make_dir(self):
         base_dir = os.path.dirname(self.total_path)
@@ -54,6 +47,7 @@ class LocalFileTask:
                 size = os.path.getsize(self.total_path)
                 if size < self.file.get_size():
                     self._seek = size
+                    self.bar.update(self._seek)
                 else:
                     raise TaskExistError(path=self.total_path)
 
@@ -62,7 +56,7 @@ class LocalFileTask:
             async with aiofiles.open(self.total_path, "ab") as f:
                 async with (await self.file.get_reader(start=self._seek)) as reader:
                     while True:
-                        data = await reader.read(STEP_SIZE)
+                        data = await reader.read(Args.STEP_SIZE)
                         if not data:
                             break
                         await f.write(data)
@@ -99,7 +93,7 @@ class LocalFileTasks:
         self._path = path
 
     @classmethod
-    def transport_factory(cls, path, config):
+    def transport_factory(cls, path):
         return cls(path=path)
 
     async def get_task(self, file):

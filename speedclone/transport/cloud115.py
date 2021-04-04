@@ -4,8 +4,6 @@ import datetime
 import hashlib
 import hmac
 import json
-
-# import logging
 import math
 import os
 import time
@@ -17,7 +15,7 @@ from Crypto.Cipher import PKCS1_v1_5 as Cipher_pkcs1_v1_5
 from Crypto.PublicKey import RSA
 
 from .. import ahttpx
-from ..args import args_dict
+from ..args import Args
 from ..error import HttpStatusError, TaskFailError, TaskNotDoneError
 from ..filereader import HttpFileReader
 from ..utils import (
@@ -65,11 +63,6 @@ PRIVATE_KEY = (
     "wlHF+mkTJpKd5Wacef0vV+xumqNorvLpIXWKwxNaoHM=\n"
     "-----END RSA PRIVATE KEY-----"
 )
-
-CHUNK_SIZE = args_dict["CHUNK_SIZE"]
-STEP_SIZE = args_dict["STEP_SIZE"]
-DOWNLOAD_CHUNK_SIZE = args_dict["DOWNLOAD_CHUNK_SIZE"]
-MAX_PAGE_SIZE = args_dict["MAX_PAGE_SIZE"]
 
 
 class Secret:
@@ -381,34 +374,25 @@ class Cloud115Client:
         target = "U_1_" + cid
 
         id_sig = hashlib.sha1(
-            "".join([self.user_id, total_hash, target, "0"]).encode("utf-8")
+            (self.user_id + total_hash + target + "0").encode()
         ).hexdigest()
 
         sig = (
-            hashlib.sha1("".join([self.user_key, id_sig, "000000"]).encode("utf-8"))
+            hashlib.sha1((self.user_key + id_sig + "000000").encode())
             .hexdigest()
             .upper()
         )
 
-        id_md5 = hashlib.md5(self.user_id.encode("utf-8")).hexdigest()
-        ts = int(time.time())
-        token = hashlib.md5(
-            "".join(
-                [total_hash, str(file_size), block_hash, self.user_id, str(ts), id_md5]
-            ).encode("utf-8")
-        ).hexdigest()
-
         params = {
             "appid": 0,
-            "appfrom": 12,
+            "appfrom": 10,
             "appversion": "2.0.0.0",
             "format": "json",
             "isp": 0,
             "sig": sig,
-            "t": ts,
+            "t": int(time.time()),
             "topupload": 0,
             "rt": 0,
-            "token": token,
         }
 
         data = {
@@ -463,7 +447,7 @@ class Cloud115Client:
         params = {
             "cid": cid,
             "aid": 1,
-            "limit": MAX_PAGE_SIZE,
+            "limit": Args.MAX_PAGE_SIZE,
             "show_dir": 1,
             "offset": offset,
         }
@@ -541,7 +525,7 @@ class Cloud115File:
         return HttpFileReader(
             url,
             headers=headers,
-            data_range=(start, end or self.size, DOWNLOAD_CHUNK_SIZE),
+            data_range=(start, end or self.size, Args.DOWNLOAD_CHUNK_SIZE),
             max_workers=2,
         )
 
@@ -558,17 +542,13 @@ class Cloud115Task:
         self.bar = None
 
     def set_bar(self, bar):
-        if self.bar is None:
-            self.bar = bar
-            self.set_bar_info()
-
-    def set_bar_info(self):
-        self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
+        self.bar = bar
+        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
 
     async def hash_file(self):
         is_115file = isinstance(self.file, Cloud115File)
 
-        if is_115file and hasattr(self.file, "block_hash"):
+        if is_115file and self.file.block_hash:
             block_hash = self.file.block_hash
         elif self._block_hash:
             block_hash = self._block_hash
@@ -578,21 +558,27 @@ class Cloud115Task:
                     hashlib.sha1(await reader.read(1024 * 128)).hexdigest().upper()
                 )
 
-        if is_115file and hasattr(self.file, "total_hash"):
+        if is_115file and self.file.total_hash:
             total_hash = self.file.total_hash
         elif self._total_hash:
             total_hash = self._total_hash
         else:
+            sub_bar = self.bar.get_sub_bar(self.file.get_relative_path())
+            sub_bar.set_info(
+                total=self.file.get_size(),
+                content=f"culcuating sha1 {self.file.get_relative_path()}",
+            )
+
             total_sha1 = hashlib.sha1()
             async with (await self.file.get_reader()) as reader:
                 while True:
-                    data = await reader.read(CHUNK_SIZE)
+                    data = await reader.read(1024 ** 2)
                     if not data:
                         break
                     total_sha1.update(data)
+                    sub_bar.update(len(data))
 
             total_hash = self._total_hash = total_sha1.hexdigest().upper()
-
         return block_hash, total_hash
 
     async def run(self):
@@ -624,7 +610,7 @@ class Cloud115Task:
 
                 async with (await self.file.get_reader()) as reader:
                     data = aiter_data(
-                        reader, self.bar.update, STEP_SIZE, self.file.get_size()
+                        reader, self.bar.update, Args.STEP_SIZE, self.file.get_size()
                     )
                     await oss_upload.upload(
                         data=data, callback=callback, callback_var=callback_var
@@ -642,15 +628,19 @@ class Cloud115Task:
                 ) as reader:
                     for i, start in enumerate(
                         range(
-                            oss_upload.uploaded_bytes, self.file.get_size(), CHUNK_SIZE
+                            oss_upload.uploaded_bytes,
+                            self.file.get_size(),
+                            Args.CHUNK_SIZE,
                         ),
                         len(oss_upload.parts) + 1,
                     ):
-                        length = min(start + CHUNK_SIZE, self.file.get_size()) - start
+                        length = (
+                            min(start + Args.CHUNK_SIZE, self.file.get_size()) - start
+                        )
                         await oss_upload.upload_part(
                             part_number=i,
                             data=aiter_data(
-                                reader, self.bar.update, STEP_SIZE, length=length
+                                reader, self.bar.update, Args.STEP_SIZE, length=length
                             ),
                         )
                         oss_upload.uploaded_bytes += length

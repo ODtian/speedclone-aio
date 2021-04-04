@@ -1,4 +1,6 @@
-from tqdm.autonotebook import tqdm
+from tqdm import tqdm
+
+from .commonbar import CommonBar
 
 
 class VirtualBar:
@@ -7,8 +9,14 @@ class VirtualBar:
         self.bytes_counted = 0
         self.bytes_total = 0
 
-    def set_info(self, file_size, total_path):
-        self.bytes_total = file_size
+        self._sub_bars = {}
+
+    def get_sub_bar(self, name):
+        sub_bar = self._sub_bars[name] = CommonBar(level=1)
+        return sub_bar
+
+    def set_info(self, total=0, content=""):
+        self.bytes_total = total
         self.main_bar.add_total_bytes(self.bytes_total)
         self.main_bar.add_total_tasks(1)
 
@@ -34,10 +42,11 @@ class OverallBar:
         bar_format = "| {desc} | {percentage: >6.2f}% |{bar:20}| {n_fmt:>6} / {total_fmt:<6} [{rate_fmt:<8} {elapsed}>{remaining}]"
         self._bar = tqdm(
             total=0,
+            bar_format=bar_format,
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
-            bar_format=bar_format,
+            dynamic_ncols=True,
         )
 
     def _get_tasks_count(self):
