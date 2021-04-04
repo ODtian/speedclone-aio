@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument(
         "-I",
         "--interval",
-        default=0.05,
+        default=1,
         type=float,
         help="Interval time when putting workers into thread pool.",
     )

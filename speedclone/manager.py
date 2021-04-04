@@ -53,8 +53,6 @@ class TransferManager:
             else:
                 self._add_to_loop(self._worker(task))
 
-            await asyncio.sleep(self._interval)
-
     async def _worker(self, task):
         async with self._lock:
             bar = self._bar_manager.get_bar()
@@ -84,6 +82,8 @@ class TransferManager:
                 if i == (self._max_retries - 1):
                     self._task_queue.task_done()
                     self.failed.append(task.get_relative_path())
+
+                await asyncio.sleep(self._interval)
 
     def _add_to_loop(self, excutor):
         return asyncio.run_coroutine_threadsafe(excutor, self._loop)
