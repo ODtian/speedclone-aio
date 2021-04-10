@@ -1,7 +1,6 @@
 aiofiles
 httpx
-tqdm
 pyjwt
 pycryptodome
-colorlog
+rich
 aioaria2

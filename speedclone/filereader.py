@@ -142,9 +142,7 @@ class HttpFileReader:
         self._closed = False
 
     async def __aenter__(self):
-        self._streamer_future = asyncio.run_coroutine_threadsafe(
-            self._streamer(), self._loop
-        )
+        self._streamer_future = asyncio.create_task(self._streamer())
         return self
 
     async def __aexit__(self, *args, **kwargs):
@@ -169,7 +167,9 @@ class HttpFileReader:
                 yield range_for_worker
 
     async def _client_request(self, request_range):
-        async with AsyncClient(**self.request_args, proxies=Args.PROXY) as client:
+        async with AsyncClient(
+            **self.request_args, proxies=Args.PROXY, timeout=60
+        ) as client:
             for index, start, end in request_range:
                 async with client.stream(
                     "GET", self.url, headers={"Range": f"bytes={start}-{end - 1}"}

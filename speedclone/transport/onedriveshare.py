@@ -5,6 +5,7 @@ import httpx
 
 from .. import ahttpx
 from ..args import Args
+from ..error import FileListError, HttpStatusError
 from ..filereader import HttpFileReader
 from ..utils import format_path, parse_cookies, raise_for_status
 
@@ -118,18 +119,28 @@ class OnedriveShareFiles:
             async for item in self._list_items(folder):
                 yield item
 
-    async def iter_file(self):
-        base_path, _ = os.path.split(self._path)
-        async for unique_id, path, size in self._list_items(self._path):
-            relative_path = path[len(base_path) :]
-            download_url = DOWNLOAD_URL.format(
-                tenant_name=self._tenant_name,
-                account_name=self._account_name,
-                unique_id=unique_id,
+    async def list_file(self):
+        try:
+            base_path, _ = os.path.split(self._path)
+            async for unique_id, path, size in self._list_items(self._path):
+                relative_path = path[len(base_path) :]
+                download_url = DOWNLOAD_URL.format(
+                    tenant_name=self._tenant_name,
+                    account_name=self._account_name,
+                    unique_id=unique_id,
+                )
+                yield OnedriveShareFile(
+                    download_url=download_url,
+                    relative_path=relative_path,
+                    size=size,
+                    cookies=self._cookies,
+                )
+        except HttpStatusError as e:
+            raise FileListError(
+                path=self._path,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
+                traceback=False,
             )
-            yield OnedriveShareFile(
-                download_url=download_url,
-                relative_path=relative_path,
-                size=size,
-                cookies=self._cookies,
-            )
+        except Exception as e:
+            raise FileListError(self._path, type(e).__name__)

@@ -3,7 +3,14 @@ import os
 import aiofiles
 
 from ..args import Args
-from ..error import TaskError, TaskExistError, TaskFailError, TaskNotDoneError
+from ..error import (
+    FileListError,
+    HttpStatusError,
+    TaskError,
+    TaskExistError,
+    TaskFailError,
+    TaskNotDoneError,
+)
 from ..filereader import LocalFileReader
 from ..utils import format_path, iter_path
 
@@ -34,7 +41,9 @@ class LocalFileTask:
 
     def set_bar(self, bar):
         self.bar = bar
-        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
+        self.bar.set_info(
+            total=self.file.get_size(), content=f"Task '/{self.total_path}'"
+        )
 
     def _make_dir(self):
         base_dir = os.path.dirname(self.total_path)
@@ -65,6 +74,14 @@ class LocalFileTask:
         except TaskError as e:
             raise e
 
+        except HttpStatusError as e:
+            raise TaskFailError(
+                path=self.total_path,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
+                traceback=False,
+            )
+
         except Exception as e:
             raise TaskFailError(path=self.total_path, error_msg=type(e).__name__)
 
@@ -81,11 +98,14 @@ class LocalFiles:
     def transport_factory(cls, path):
         return cls(path=path)
 
-    async def iter_file(self):
-        base_path, _ = os.path.split(self._path)
-        for local_path in iter_path(self._path):
-            relative_path = local_path[len(base_path) :]
-            yield LocalFile(local_path, relative_path)
+    async def list_file(self):
+        try:
+            base_path, _ = os.path.split(self._path)
+            for local_path in iter_path(self._path):
+                relative_path = local_path[len(base_path) :]
+                yield LocalFile(local_path, relative_path)
+        except Exception as e:
+            raise FileListError(self._path, type(e).__name__)
 
 
 class LocalFileTasks:

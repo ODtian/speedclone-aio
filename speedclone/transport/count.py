@@ -8,12 +8,10 @@ class CountTask:
         self.bar = None
 
     def set_bar(self, bar):
-        if self.bar is None:
-            self.bar = bar
-            self.set_bar_info()
-
-    def set_bar_info(self):
-        self.bar.set_info(file_size=self.file.get_size(), total_path=self.total_path)
+        self.bar = bar
+        self.bar.set_info(
+            total=self.file.get_size(), content=f"Task '/{self.total_path}'"
+        )
 
     async def run(self):
         self.bar.update(self.file.get_size())

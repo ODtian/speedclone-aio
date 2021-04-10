@@ -18,15 +18,17 @@ class Aria2Task:
 
     def set_bar(self, bar):
         self.bar = bar
-        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
+        self.bar.set_info(
+            total=self.file.get_size(), content=f"Task '/{self.total_path}'"
+        )
 
     async def run(self):
         if not hasattr(self.file, "get_download_info"):
             raise TaskFailError(
                 path=self.total_path,
                 error_msg="File can't download by aria2",
-                task_exit=True,
                 traceback=False,
+                task_exit=True,
             )
 
         downloaded_length = 0
@@ -61,8 +63,8 @@ class Aria2Task:
                     raise TaskFailError(
                         path=self.total_path,
                         error_msg="aria2 download removed",
-                        task_exit=True,
                         traceback=False,
+                        task_exit=True,
                     )
 
                 elif status["status"] == "complete":

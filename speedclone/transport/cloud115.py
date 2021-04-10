@@ -16,7 +16,7 @@ from Crypto.PublicKey import RSA
 
 from .. import ahttpx
 from ..args import Args
-from ..error import HttpStatusError, TaskFailError, TaskNotDoneError
+from ..error import FileListError, HttpStatusError, TaskFailError, TaskNotDoneError
 from ..filereader import HttpFileReader
 from ..utils import (
     aiter_data,
@@ -416,17 +416,16 @@ class Cloud115Client:
             return True
 
         status_code = json_resp["statuscode"]
-        if status_code != 0:
-            raise HttpStatusError(r, int(f"1{status_code}"))
+
+        if status_code == 414:
+            return True
+        elif status_code != 0:
+            raise HttpStatusError(r, status_code)
 
         callback = json_resp["callback"]
 
-        b64_callback = base64.b64encode(callback["callback"].encode("utf-8")).decode(
-            "utf-8"
-        )
-        b64_callback_var = base64.b64encode(
-            callback["callback_var"].encode("utf-8")
-        ).decode("utf-8")
+        b64_callback = base64.b64encode(callback["callback"].encode()).decode()
+        b64_callback_var = base64.b64encode(callback["callback_var"].encode()).decode()
 
         return json_resp["bucket"], json_resp["object"], b64_callback, b64_callback_var
 
@@ -537,54 +536,100 @@ class Cloud115Task:
         self.cid_future = cid_future
         self.client = client
 
+        self.bar = None
+
         self._block_hash = None
         self._total_hash = None
-        self.bar = None
+        self._oss_upload = None
 
     def set_bar(self, bar):
         self.bar = bar
-        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
+        self.bar.set_info(
+            total=self.file.get_size(), content=f"Task '/{self.total_path}'"
+        )
 
-    async def hash_file(self):
-        is_115file = isinstance(self.file, Cloud115File)
-
-        if is_115file and self.file.block_hash:
-            block_hash = self.file.block_hash
+    async def _get_block_hash(self):
+        if isinstance(self.file, Cloud115File) and self.file.block_hash:
+            return self.file.block_hash
         elif self._block_hash:
-            block_hash = self._block_hash
+            return self._block_hash
         else:
             async with (await self.file.get_reader(end=1024 * 128)) as reader:
-                block_hash = self._block_hash = (
+                self._block_hash = (
                     hashlib.sha1(await reader.read(1024 * 128)).hexdigest().upper()
                 )
+                return self._block_hash
 
-        if is_115file and self.file.total_hash:
-            total_hash = self.file.total_hash
+    async def _get_total_hash(self):
+        if isinstance(self.file, Cloud115File) and self.file.total_hash:
+            return self.file.total_hash
         elif self._total_hash:
-            total_hash = self._total_hash
+            return self._total_hash
         else:
-            sub_bar = self.bar.get_sub_bar(self.file.get_relative_path())
+            sub_bar = self.bar.get_sub_bar()
             sub_bar.set_info(
                 total=self.file.get_size(),
-                content=f"culcuating sha1 {self.file.get_relative_path()}",
+                content=f"Culcuating SHA1 '{os.path.basename(self.file.get_relative_path())}'",
             )
 
             total_sha1 = hashlib.sha1()
             async with (await self.file.get_reader()) as reader:
                 while True:
-                    data = await reader.read(1024 ** 2)
+                    data = await reader.read(1024)
                     if not data:
                         break
                     total_sha1.update(data)
                     sub_bar.update(len(data))
 
-            total_hash = self._total_hash = total_sha1.hexdigest().upper()
-        return block_hash, total_hash
+            self._total_hash = total_sha1.hexdigest().upper()
+            sub_bar.disappear()
+
+            return self._total_hash
+
+    async def _upload_simple(self, bucket_name, object_name, callback, callback_var):
+        oss_upload = self.client.create_upload(bucket_name, object_name, is_simple=True)
+
+        async with (await self.file.get_reader()) as reader:
+            data = aiter_data(
+                reader, self.bar.update, Args.STEP_SIZE, self.file.get_size()
+            )
+            await oss_upload.upload(
+                data=data, callback=callback, callback_var=callback_var
+            )
+
+    async def _upload_multipart(self, bucket_name, object_name, callback, callback_var):
+        if not self._oss_upload:
+            self._oss_upload = self.client.create_upload(
+                bucket_name, object_name, is_simple=False
+            )
+
+        oss_upload = self._oss_upload
+
+        await oss_upload.init_multipart_upload()
+
+        async with (
+            await self.file.get_reader(start=oss_upload.uploaded_bytes)
+        ) as reader:
+            self.bar.update(oss_upload.uploaded_bytes)
+
+            upload_range = range(
+                oss_upload.uploaded_bytes, self.file.get_size(), Args.CHUNK_SIZE
+            )
+
+            for i, start in enumerate(upload_range, len(oss_upload.parts) + 1):
+                length = min(start + Args.CHUNK_SIZE, self.file.get_size()) - start
+
+                await oss_upload.upload_part(
+                    part_number=i,
+                    data=aiter_data(reader, self.bar.update, Args.STEP_SIZE, length),
+                )
+                oss_upload.uploaded_bytes += length
 
     async def run(self):
         try:
             cid = await self.cid_future
-            block_hash, total_hash = await self.hash_file()
+            block_hash = await self._get_block_hash()
+            total_hash = await self._get_total_hash()
             file_size = self.file.get_size()
             file_name = os.path.basename(self.file.get_relative_path())
 
@@ -597,59 +642,22 @@ class Cloud115Task:
             )
 
             if upload_fast is True:
+                import logging
+
+                logging.info("1")
                 self.bar.update(file_size)
                 return
 
-            bucket_name, object_name, callback, callback_var = upload_fast
-
             if file_size <= 100 * 1024:
-
-                oss_upload = self.client.create_upload(
-                    bucket_name, object_name, is_simple=True
-                )
-
-                async with (await self.file.get_reader()) as reader:
-                    data = aiter_data(
-                        reader, self.bar.update, Args.STEP_SIZE, self.file.get_size()
-                    )
-                    await oss_upload.upload(
-                        data=data, callback=callback, callback_var=callback_var
-                    )
-
+                await self._upload_simple(*upload_fast)
             else:
-                oss_upload = self.client.create_upload(
-                    bucket_name, object_name, is_simple=False
-                )
-
-                await oss_upload.init_multipart_upload()
-
-                async with (
-                    await self.file.get_reader(start=oss_upload.uploaded_bytes)
-                ) as reader:
-                    for i, start in enumerate(
-                        range(
-                            oss_upload.uploaded_bytes,
-                            self.file.get_size(),
-                            Args.CHUNK_SIZE,
-                        ),
-                        len(oss_upload.parts) + 1,
-                    ):
-                        length = (
-                            min(start + Args.CHUNK_SIZE, self.file.get_size()) - start
-                        )
-                        await oss_upload.upload_part(
-                            part_number=i,
-                            data=aiter_data(
-                                reader, self.bar.update, Args.STEP_SIZE, length=length
-                            ),
-                        )
-                        oss_upload.uploaded_bytes += length
+                await self._upload_multipart(*upload_fast)
 
         except HttpStatusError as e:
             raise TaskFailError(
                 path=self.total_path,
-                error_msg=str(e),
-                task_exit=e.status_code == 1414,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
                 traceback=False,
             )
 
@@ -685,72 +693,94 @@ class Cloud115Files(Cloud115Base):
         self._path = path
         self._client = client
 
-        self._nodes = self._path.split("/")
-        self._nodes_len = len(self._nodes)
+        self._path_nodes = self._path.split("/")
 
-    async def _get_base_objects(self):
+    async def _get_base_items(self):
         cid = "0"
 
-        for i, n in enumerate(self._nodes, 1):
-            files = await self._client.list_files(cid=cid)
-            files_same_name = tuple(filter(lambda f: f["n"] == n, files["data"]))
+        for i, node in enumerate(self._path_nodes):
+            items = await self._client.list_files(cid=cid)
+            same_name_items = tuple(item for item in items["data"] if item["n"] == node)
 
-            if i != self._nodes_len:
-                next_folders = filter(lambda f: f.get("fid") is None, files_same_name)
-                cid = tuple(next_folders)[0]["cid"]
-            else:
-                result = (
-                    [
-                        (f["pc"], f["sha"], f["n"], f["s"])
-                        for f in files_same_name
-                        if f.get("fid") is not None
-                    ],
-                    [f["cid"] for f in files_same_name if f.get("fid") is None],
+            if not same_name_items:
+                now_path = "root:/" + format_path(*self._path_nodes[:i])
+                raise FileNotFoundError(
+                    f"No file or folder '{node}' found in '{now_path}'"
                 )
-                return result
 
-        raise ValueError("No such file.")
-
-    async def _list_files(self, cid, offset=0):
-        data = await self._client.list_files(cid, offset=offset)
-
-        base_path = format_path(*[p["name"] for p in data["path"][self._nodes_len :]])
-        dirs = []
-
-        for f in data["data"]:
-            if f.get("fid") is None:
-                dirs.append(f)
-            else:
-                yield (f["pc"], f["sha"], format_path(base_path, f["n"]), f["s"])
-
-        files_length = len(data["data"])
-        now_seek = files_length + offset
-
-        if now_seek < data["count"]:
-            async for f in self._list_files(cid, offset=now_seek):
-                yield f
-
-        for d in dirs:
-            async for f in self._list_files(d["cid"]):
-                yield f
-
-    async def iter_file(self):
-        files, folders = await self._get_base_objects()
-
-        for pick_code, sha1, name, size in files:
-            yield Cloud115File(
-                name, size, self._client, pick_code=pick_code, total_hash=sha1
+            folders = tuple(
+                item["cid"] for item in same_name_items if item.get("fid") is None
             )
 
-        for cid in folders:
-            async for pick_code, sha1, relative_path, size in self._list_files(cid=cid):
-                yield Cloud115File(
-                    relative_path,
-                    size,
-                    self._client,
-                    pick_code=pick_code,
-                    total_hash=sha1,
+            if i == len(self._path_nodes) - 1:
+                files = tuple(
+                    (item["pc"], item["sha"], item["n"], item["s"])
+                    for item in same_name_items
+                    if item.get("fid") is not None
                 )
+                return files, folders
+
+            else:
+                cid = folders[0]
+
+    async def _list_items(self, cid, offset=0):
+        r = await self._client.list_files(cid, offset=offset)
+        base_path = format_path(
+            *[path["name"] for path in r["path"][len(self._path_nodes) :]]
+        )
+
+        data = r["data"]
+        folders = []
+
+        for item in data:
+            if item.get("fid") is None:
+                folders.append(item)
+            else:
+                yield (
+                    item["pc"],
+                    item["sha"],
+                    format_path(base_path, item["n"]),
+                    item["s"],
+                )
+
+        now_seek = len(data) + offset
+
+        if now_seek < r["count"]:
+            async for item in self._list_items(cid, offset=now_seek):
+                yield item
+
+        for folder in folders:
+            async for item in self._list_items(folder["cid"]):
+                yield item
+
+    async def list_file(self):
+        try:
+            files, folders = await self._get_base_items()
+
+            for pick_code, sha1, name, size in files:
+                yield Cloud115File(
+                    name, size, self._client, pick_code=pick_code, total_hash=sha1
+                )
+
+            for cid in folders:
+                async for pick_code, sha1, relative_path, size in self._list_items(cid):
+                    yield Cloud115File(
+                        relative_path,
+                        size,
+                        self._client,
+                        pick_code=pick_code,
+                        total_hash=sha1,
+                    )
+
+        except HttpStatusError as e:
+            raise FileListError(
+                path=self._path,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
+                traceback=False,
+            )
+        except Exception as e:
+            raise FileListError(self._path, type(e).__name__)
 
 
 class Cloud115HashFiles(Cloud115Base):
@@ -760,10 +790,9 @@ class Cloud115HashFiles(Cloud115Base):
 
         self.files = []
         if os.path.isfile(self._path):
-            with open(self._path, "r", encoding="utf-8") as f:
-                for l in f:
-
-                    self.files.append(self._split_link(l.strip()))
+            with open(self._path, "r") as f:
+                for line in f:
+                    self.files.append(self._split_link(line.strip()))
         else:
             self.files.append(self._split_link(self._path))
 
@@ -771,7 +800,7 @@ class Cloud115HashFiles(Cloud115Base):
         name, size, total_hash, block_hash = link.lstrip("115://").split("|")
         return name, int(size), total_hash, block_hash
 
-    async def iter_file(self):
+    async def list_file(self):
         for name, size, total_hash, block_hash in self.files:
             yield Cloud115File(
                 name,
@@ -789,28 +818,38 @@ class Cloud115Tasks(Cloud115Base):
 
         self._loop = asyncio.get_event_loop()
 
-        root = self._loop.create_future()
-        root.set_result("0")
+        self._folders = {}
+        self._create_root_future()
 
-        self._dir_create = {"": root}
+    def _create_root_future(self):
+        future = self._loop.create_future()
+        future.set_result("0")
+        self._folders[""] = future
 
     def _create_folder_future(self, path):
-        exist_future = self._dir_create.get(path)
-        if exist_future:
+        exist_future = self._folders.get(path)
+        if (
+            exist_future
+            and not exist_future.cancelled()
+            and not (exist_future.done() and exist_future.exception())
+        ):
             return exist_future
         else:
             future = self._loop.create_future()
-            self._dir_create[path] = future
+            self._folders[path] = future
 
             async def set_folder_id():
-                parent_path, name = os.path.split(path)
-                parent_id_future = self._create_folder_future(parent_path)
-                parent_id = await parent_id_future
-                cid = await self._client.create_folder(parent_id, name)
-                future.set_result(cid)
+                try:
+                    parent_path, name = os.path.split(path)
 
-            asyncio.run_coroutine_threadsafe(set_folder_id(), self._loop)
+                    parent_id_future = self._create_folder_future(parent_path)
+                    parent_id = await parent_id_future
+                    cid = await self._client.create_folder(parent_id, name)
+                    future.set_result(cid)
+                except Exception as e:
+                    future.set_exception(e)
 
+            asyncio.create_task(set_folder_id())
             return future
 
     async def get_task(self, file):

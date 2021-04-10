@@ -10,6 +10,7 @@ import jwt
 from .. import ahttpx
 from ..args import Args
 from ..error import (
+    FileListError,
     HttpStatusError,
     TaskError,
     TaskExistError,
@@ -26,6 +27,16 @@ TOKEN_EXPIRES_IN = 3600
 DRIVE_URL = "https://www.googleapis.com/drive/v3/files"
 DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 FOLDER_MIMETYPE = "application/vnd.google-apps.folder"
+
+ITEM_LIST_FIELDS = ", ".join(
+    (
+        "nextPageToken",
+        "files/id",
+        "files/name",
+        "files/size",
+        "files/mimeType",
+    )
+)
 
 
 class GoogleTokenBackend:
@@ -364,7 +375,9 @@ class GoogleDriveTask:
 
     def set_bar(self, bar):
         self.bar = bar
-        self.bar.set_info(total=self.file.get_size(), content=self.total_path)
+        self.bar.set_info(
+            total=self.file.get_size(), content=f"Task '/{self.total_path}'"
+        )
 
     async def _upload_single_chunk(self, reader, start):
         end = min(start + Args.CHUNK_SIZE, self.file.get_size())
@@ -434,7 +447,12 @@ class GoogleDriveTask:
             raise e
 
         except HttpStatusError as e:
-            raise TaskFailError(path=self.total_path, error_msg=str(e), traceback=False)
+            raise TaskFailError(
+                path=self.total_path,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
+                traceback=False,
+            )
 
         except Exception as e:
             raise TaskFailError(path=self.total_path, error_msg=type(e).__name__)
@@ -499,40 +517,41 @@ class GoogleDriveFiles(GoogleDriveBase):
         self._root, *base_path = self._path.split("/")
         self._base_path = format_path(*base_path)
 
-    async def _get_base_item(self):
+    async def _get_base_folder(self):
         client = self._get_client()
+        path_nodes = self._base_path.split("/")
+        parent_id = self._root
 
+        for i, node in enumerate(path_nodes):
+            items = (
+                await client.list_files_by_name(
+                    parent_id,
+                    node,
+                    fields=(
+                        "files/id",
+                        "files/name",
+                        "files/mimeType",
+                        "files/size",
+                    ),
+                )
+            ).get("files")
+
+            if not items:
+                now_path = "root:/" + format_path(*path_nodes[:i])
+                raise FileNotFoundError(
+                    f"No file or folder '{node}' found in '{now_path}'"
+                )
+
+            if i == len(path_nodes) - 1:
+                return items[0]
+            else:
+                parent_id = items[0]["id"]
+
+    async def _get_base_item(self):
         if self._base_path:
-            parent_id = self._root
-            item = None
-            paths = self._base_path.split("/")
-
-            for i, name in enumerate(paths):
-                items = (
-                    await client.list_files_by_name(
-                        parent_id,
-                        name,
-                        fields=(
-                            "files/id",
-                            "files/name",
-                            "files/mimeType",
-                            "files/size",
-                        ),
-                    )
-                ).get("files", [])
-
-                if not items:
-                    now_path = "root:/" + format_path(*paths[:i])
-                    raise FileNotFoundError(
-                        f"No file or folder '{name}' found in '{now_path}'"
-                    )
-                item = items[0]
-
-                if i == len(paths) - 1:
-                    return item
-                else:
-                    parent_id = item["id"]
+            return await self._get_base_folder()
         else:
+            client = self._get_client()
             return await client.get_file_by_id(
                 self._root, fields=("id", "name", "mimeType", "size")
             )
@@ -543,15 +562,7 @@ class GoogleDriveFiles(GoogleDriveBase):
         params = {
             "q": f"'{item['id']}' in parents and trashed = false",
             "pageSize": Args.MAX_PAGE_SIZE,
-            "fields": ", ".join(
-                (
-                    "nextPageToken",
-                    "files/id",
-                    "files/name",
-                    "files/size",
-                    "files/mimeType",
-                )
-            ),
+            "fields": ITEM_LIST_FIELDS,
         }
         if page_token:
             params.update({"pageToken": page_token})
@@ -576,18 +587,32 @@ class GoogleDriveFiles(GoogleDriveBase):
             async for i in self._list_items(folder):
                 yield i
 
-    async def iter_file(self):
-        base_item = await self._get_base_item()
-        if base_item["mimeType"] != FOLDER_MIMETYPE:
-            yield GoogleDriveFile(
-                base_item["id"],
-                base_item["name"],
-                int(base_item["size"]),
-                self._get_client(),
+    async def list_file(self):
+        try:
+            base_item = await self._get_base_item()
+            if base_item["mimeType"] != FOLDER_MIMETYPE:
+                yield GoogleDriveFile(
+                    base_item["id"],
+                    base_item["name"],
+                    int(base_item["size"]),
+                    self._get_client(),
+                )
+            else:
+                async for file_id, relative_path, size in self._list_items(base_item):
+                    yield GoogleDriveFile(
+                        file_id, relative_path, size, self._get_client()
+                    )
+
+        except HttpStatusError as e:
+            raise FileListError(
+                path=self._path,
+                error_msg="Bad response",
+                extra_msg=e.build_raw_response(),
+                traceback=False,
             )
-        else:
-            async for file_id, relative_path, size in self._list_items(base_item):
-                yield GoogleDriveFile(file_id, relative_path, size, self._get_client())
+
+        except Exception as e:
+            raise FileListError(self._path, type(e).__name__)
 
 
 class GoogleDriveTasks(GoogleDriveBase):
@@ -599,18 +624,26 @@ class GoogleDriveTasks(GoogleDriveBase):
         self._base_path = format_path(*base_path)
 
         self._loop = asyncio.get_event_loop()
-        root_future = self._loop.create_future()
-        root_future.set_result(self._root)
 
-        self._dir_create = {"": root_future}
+        self._folders = {}
+        self._create_root_future()
+
+    def _create_root_future(self):
+        future = self._loop.create_future()
+        future.set_result(self._root)
+        self._folders[""] = future
 
     def _create_folder_future(self, path):
-        exist_future = self._dir_create.get(path)
-        if exist_future:
+        exist_future = self._folders.get(path)
+        if (
+            exist_future
+            and not exist_future.cancelled()
+            and not (exist_future.done() and exist_future.exception())
+        ):
             return exist_future
         else:
             future = self._loop.create_future()
-            self._dir_create[path] = future
+            self._folders[path] = future
 
             async def set_folder_id():
                 try:
@@ -620,17 +653,16 @@ class GoogleDriveTasks(GoogleDriveBase):
                     parent_id = await parent_id_future
 
                     client = self._get_client()
-                    resp = await client.create_file_by_name(
+                    create_r = await client.create_file_by_name(
                         parent_id, name, is_folder=True
                     )
 
-                    folder_id = resp["id"]
+                    folder_id = create_r["id"]
                     future.set_result(folder_id)
                 except Exception as e:
                     future.set_exception(e)
 
-            asyncio.run_coroutine_threadsafe(set_folder_id(), self._loop)
-
+            asyncio.create_task(set_folder_id())
             return future
 
     async def get_task(self, file):

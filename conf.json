@@ -3,46 +3,46 @@
     "lf": {
       "mod": "transport.localfile",
       "cls": {
-        "source": "LocalFiles",
-        "target": "LocalFileTasks"
+        "files": "LocalFiles",
+        "tasks": "LocalFileTasks"
       }
     },
     "115": {
       "mod": "transport.cloud115",
       "cls": {
-        "source": "Cloud115Files",
-        "target": "Cloud115Tasks"
+        "files": "Cloud115Files",
+        "tasks": "Cloud115Tasks"
       }
     },
     "115hash": {
       "mod": "transport.cloud115",
       "cls": {
-        "source": "Cloud115HashFiles"
+        "files": "Cloud115HashFiles"
       }
     },
     "gd": {
       "mod": "transport.googledrive",
       "cls": {
-        "source": "GoogleDriveFiles",
-        "target": "GoogleDriveTasks"
+        "files": "GoogleDriveFiles",
+        "tasks": "GoogleDriveTasks"
       }
     },
     "odshare": {
       "mod": "transport.onedriveshare",
       "cls": {
-        "source": "OnedriveShareFiles"
+        "files": "OnedriveShareFiles"
       }
     },
     "aria2": {
       "mod": "transport.aria2",
       "cls": {
-        "target": "Aria2Tasks"
+        "tasks": "Aria2Tasks"
       }
     },
     "count": {
       "mod": "transport.count",
       "cls": {
-        "target": "CountTasks"
+        "tasks": "CountTasks"
       }
     }
   },

@@ -63,7 +63,7 @@ class Client:
 
 
 client = Client()
-on_close_callbacks.append(client.close())
+on_close_callbacks.append(client.close)
 
 
 async def get(

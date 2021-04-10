@@ -59,7 +59,7 @@ def parse_args():
 
     parser.add_argument(
         "--step-size",
-        default=1024 ** 2,
+        default=(1024 ** 2),
         type=int,
         help="Size of chunk when updating the progress bar.",
     )
